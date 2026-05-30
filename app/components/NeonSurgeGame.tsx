@@ -5027,7 +5027,7 @@ export default function NeonSurgeGame() {
                             const newLevels = { ...equipmentLevels };
                             (newLevels as any)[key] = level + 1;
 
-                            if (isConnected && hasEnoughNsh) {
+                            if (isConnected && hasEnoughNsh && walletClient && address) {
                               // Pay with on-chain NSH (real tx)
                               setIsNshTxPending(true);
                               try {
