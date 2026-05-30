@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+:root {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-orbitron);
+
+  /* Cyberpunk Neon Palette */
+  --neon-cyan: #00f9ff;
+  --neon-cyan-dark: #00b8c2;
+  --neon-purple: #c026ff;
+  --neon-pink: #ff2a6d;
+  --neon-blue: #00b4ff;
+  --neon-yellow: #f9e900;
+
+  --bg-black: #0a0a0f;
+  --bg-panel: #111117;
+  --bg-panel-light: #1a1a22;
+
+  --text-dim: #6b7280;
+  --text-muted: #9ca3af;
+}
+
+/* Base */
+html,
+body {
+  background: var(--bg-black);
+  color: #ededed;
+  font-family: var(--font-geist-sans);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Neon Text & Glow Utilities */
+.neon-cyan {
+  color: var(--neon-cyan);
+  text-shadow: 
+    0 0 4px var(--neon-cyan),
+    0 0 12px var(--neon-cyan),
+    0 0 24px var(--neon-cyan);
+}
+
+.neon-purple {
+  color: var(--neon-purple);
+  text-shadow: 
+    0 0 4px var(--neon-purple),
+    0 0 12px var(--neon-purple),
+    0 0 24px var(--neon-purple);
+}
+
+.neon-pink {
+  color: var(--neon-pink);
+  text-shadow: 
+    0 0 4px var(--neon-pink),
+    0 0 12px var(--neon-pink),
+    0 0 24px var(--neon-pink);
+}
+
+.neon-text {
+  text-shadow: 
+    0 0 2px currentColor,
+    0 0 8px currentColor;
+}
+
+/* Canvas container with premium neon frame */
+.game-frame {
+  position: relative;
+  padding: 8px;
+  background: linear-gradient(145deg, #1a1a22 0%, #0a0a0f 100%);
+  border: 1px solid #2a2a35;
+  border-radius: 4px;
+  box-shadow: 
+    0 0 0 1px rgba(0, 249, 255, 0.08),
+    0 25px 50px -12px rgb(0 0 0 / 0.6),
+    inset 0 1px 0 0 rgba(255,255,255,0.03);
+}
+
+.game-frame::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 5px;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    var(--neon-cyan) 0%,
+    var(--neon-purple) 50%,
+    var(--neon-pink) 100%
+  );
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* HUD Elements */
+.hud-panel {
+  background: rgba(17, 17, 23, 0.92);
+  border: 1px solid #2a2a35;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
+}
+
+.hud-value {
+  font-family: var(--font-geist-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* XP Bar */
+.xp-bar-container {
+  background: #1a1a22;
+  border: 1px solid #2a2a35;
+  overflow: hidden;
+}
+
+.xp-bar-fill {
+  background: linear-gradient(to right, var(--neon-blue), var(--neon-cyan));
+  box-shadow: 
+    0 0 8px var(--neon-cyan),
+    0 0 16px var(--neon-blue);
+  transition: width 120ms linear;
+}
+
+/* Game Over Modal */
+.game-over-modal {
+  background: rgba(10, 10, 15, 0.96);
+  border: 1px solid #2a2a35;
+  box-shadow: 
+    0 0 0 1px rgba(0, 249, 255, 0.1),
+    0 25px 50px -12px rgb(0 0 0 / 0.8);
+}
+
+.neon-button {
+  position: relative;
+  padding: 14px 48px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-size: 15px;
+  background: transparent;
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  transition: all 120ms ease;
+  overflow: hidden;
+}
+
+.neon-button:hover {
+  background: var(--neon-cyan);
+  color: #0a0a0f;
+  box-shadow: 
+    0 0 12px var(--neon-cyan),
+    0 0 24px var(--neon-cyan);
+  transform: translateY(-1px);
+}
+
+.neon-button:active {
+  transform: scale(0.985);
+}
+
+/* Instructions */
+.instructions {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+}
+
+/* Subtle scanlines for premium feel (very light) */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.04) 2px,
+    rgba(0, 0, 0, 0.04) 4px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
