@@ -720,6 +720,8 @@ export default function NeonSurgeGame() {
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const publicClient = usePublicClient();
+  // walletClient can be undefined until the wallet is fully connected.
+  // All .writeContract calls must be guarded with `if (walletClient && address)`.
   const { data: walletClient } = useWalletClient();
 
   // Short wallet display
