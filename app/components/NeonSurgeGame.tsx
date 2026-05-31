@@ -655,6 +655,9 @@ export default function NeonSurgeGame() {
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showSkillPanel, setShowSkillPanel] = useState(false);
 
+  // Mobile detection for responsive UI + warning banner
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
+
   // === Equipment System ===
   const [neonShards, setNeonShards] = useState(0);
   const [showEquipment, setShowEquipment] = useState(false);
@@ -724,6 +727,10 @@ export default function NeonSurgeGame() {
   // All .writeContract calls must be guarded with `if (walletClient && address)`.
   const { data: walletClient } = useWalletClient();
 
+  // Guest Mode: full gameplay without wallet. Blockchain features are locked.
+  const isGuestMode = IS_DEMO_MODE || !isConnected;
+  const LOCKED_FEATURE_MESSAGE = "Connect Wallet to unlock this feature";
+
   // Short wallet display
   const shortAddress = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
 
@@ -754,7 +761,7 @@ export default function NeonSurgeGame() {
 
   // Fetch authoritative tier + stageCleared from the on-chain tokenData mapping
   const refreshMyNFTsFromChain = useCallback(async () => {
-    if (!publicClient || IS_DEMO_MODE) {
+    if (!publicClient || isGuestMode) {
       return;
     }
 
@@ -809,7 +816,7 @@ export default function NeonSurgeGame() {
 
   // Discover NFTs the user owns by scanning Transfer events + enrich with live tokenData
   const syncNFTCollectionWithChain = useCallback(async () => {
-    if (!publicClient || !address || IS_DEMO_MODE) {
+    if (!publicClient || !address || isGuestMode) {
       return;
     }
 
@@ -1068,7 +1075,7 @@ export default function NeonSurgeGame() {
   // Submit current run score on-chain
   const submitScoreToLeaderboard = useCallback(async (score: number) => {
     if (!isConnected || !walletClient || !address) {
-      alert('Connect your wallet first to submit on-chain scores!');
+      alert(LOCKED_FEATURE_MESSAGE);
       return;
     }
     if (IS_DEMO_MODE) {
@@ -1130,7 +1137,7 @@ export default function NeonSurgeGame() {
   const mintSurvivorNFT = useCallback(async () => {
     if (!mintEligibility.eligible) return;
     if (!isConnected || !walletClient || !address) {
-      alert('Connect wallet to mint your NeonXurge Survivor NFT!');
+      alert(LOCKED_FEATURE_MESSAGE);
       return;
     }
 
@@ -2871,8 +2878,28 @@ export default function NeonSurgeGame() {
     const wasMoving = keysRef.current.size > 0;
     state.player.update(keysRef.current, dt, currentSpeed);
 
+    // Basic touch movement support (move toward tap location if no keyboard input)
+    if (touchTargetRef.current && keysRef.current.size === 0) {
+      const target = touchTargetRef.current;
+      const dx = target.x - state.player.x;
+      const dy = target.y - state.player.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist > 8) { // deadzone
+        const moveX = dx / dist;
+        const moveY = dy / dist;
+        state.player.x += moveX * currentSpeed * dt;
+        state.player.y += moveY * currentSpeed * dt;
+
+        // Clamp
+        const pad = state.player.radius + 4;
+        state.player.x = Math.max(pad, Math.min(CANVAS_WIDTH - pad, state.player.x));
+        state.player.y = Math.max(pad, Math.min(CANVAS_HEIGHT - pad, state.player.y));
+      }
+    }
+
     // Maintain short player trail for afterimage
-    if (wasMoving) {
+    if (wasMoving || touchTargetRef.current) {
       state.playerTrail.push({ x: state.player.x, y: state.player.y });
       if (state.playerTrail.length > 6) state.playerTrail.shift();
     } else {
@@ -4368,6 +4395,30 @@ export default function NeonSurgeGame() {
     keysRef.current.delete(e.key.toLowerCase());
   }, []);
 
+  // Basic Touch Support for mobile (tap to move toward point)
+  const touchTargetRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleTouchInput = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !gameRef.current) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    // Convert screen touch to game coordinates (accounting for CSS scaling)
+    const scaleX = CANVAS_WIDTH / rect.width;
+    const scaleY = CANVAS_HEIGHT / rect.height;
+
+    const gameX = (touch.clientX - rect.left) * scaleX;
+    const gameY = (touch.clientY - rect.top) * scaleY;
+
+    touchTargetRef.current = { x: gameX, y: gameY };
+
+    // Prevent scrolling on touch
+    e.preventDefault();
+  }, []);
+
   // Toggle Skill Panel (used by Tab and Pause button)
   const toggleSkillPanel = useCallback(() => {
     const st = gameRef.current;
@@ -4406,6 +4457,16 @@ export default function NeonSurgeGame() {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
   }, [handleKeyDown, handleKeyUp]);
+
+  // Mobile / small screen detection for responsive UI and warning
+  useEffect(() => {
+    const checkScreenSize = () => {
+      setIsSmallScreen(window.innerWidth < 768); // tablet and below
+    };
+    checkScreenSize();
+    window.addEventListener('resize', checkScreenSize);
+    return () => window.removeEventListener('resize', checkScreenSize);
+  }, []);
 
   // Format timer MM:SS
   const formatTime = (seconds: number) => {
@@ -4608,25 +4669,28 @@ export default function NeonSurgeGame() {
         <div className="relative z-10 text-center w-full max-w-4xl px-6">
           {/* Title + Wallet Connect */}
           <div className="mb-8">
-            <h1 className="font-display text-[92px] font-black tracking-[-6px] neon-cyan drop-shadow-[0_0_40px_rgba(0,249,255,0.6)]">
+            <h1 className="font-display text-5xl sm:text-6xl md:text-7xl lg:text-[92px] font-black tracking-[-4px] sm:tracking-[-6px] neon-cyan drop-shadow-[0_0_40px_rgba(0,249,255,0.6)]">
               NEONXURGE
             </h1>
             <p className="text-[#6b7280] tracking-[6px] text-sm -mt-3">CYBERPUNK SURVIVOR</p>
 
-            {/* Wallet Connect (Wagmi + MetaMask) */}
+            {/* Wallet Connect (Wagmi + MetaMask) - Always visible for Guest Mode support */}
             <div className="mt-4 flex justify-center">
-              {!isConnected ? (
-                <button
-                  onClick={() => {
-                    const mm = connectors.find(c => c.id === 'injected') || connectors[0];
-                    if (mm) connect({ connector: mm });
-                  }}
-                  disabled={isConnecting}
-                  className="px-6 py-2 rounded-lg border border-[#00f9ff]/70 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black font-mono tracking-[2px] text-sm transition-all disabled:opacity-50"
-                >
-                  {isConnecting ? 'CONNECTING...' : 'CONNECT WALLET (SEPOLIA)'}
-                </button>
-              ) : (
+              <button
+                onClick={() => {
+                  const mm = connectors.find(c => c.id === 'injected') || connectors[0];
+                  if (mm) connect({ connector: mm });
+                }}
+                disabled={isConnecting}
+                className="px-6 py-2 rounded-lg border border-[#00f9ff]/70 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black font-mono tracking-[2px] text-sm transition-all disabled:opacity-50"
+              >
+                {isConnecting ? 'CONNECTING...' : (isConnected ? 'SWITCH WALLET (SEPOLIA)' : 'CONNECT WALLET (SEPOLIA)')}
+              </button>
+            </div>
+
+            {/* Connected Wallet Status */}
+            {isConnected && (
+              <div className="mt-3 flex flex-col items-center gap-2">
                 <div className="flex items-center gap-3">
                   {/* Wallet Address */}
                   <div className="flex items-center gap-3 px-4 py-1.5 rounded-lg bg-[#111117] border border-[#00f9ff]/40">
@@ -4650,10 +4714,20 @@ export default function NeonSurgeGame() {
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
-            {isConnected && (
-              <div className="text-[10px] text-[#6b7280] mt-1 tracking-[1px]">SEPOLIA TESTNET • ON-CHAIN FEATURES ENABLED</div>
+                <div className="text-[10px] text-[#6b7280] tracking-[1px]">SEPOLIA TESTNET • ON-CHAIN FEATURES ENABLED</div>
+              </div>
+            )}
+
+            {!isConnected && (
+              <div className="text-[10px] text-[#6b7280] mt-2 tracking-[1px]">Guest Mode: Full gameplay enabled • Connect to unlock on-chain features</div>
+            )}
+
+            {/* Mobile Warning Banner - Best experienced on Desktop */}
+            {isSmallScreen && (
+              <div className="mt-4 mx-auto max-w-[420px] bg-[#1a1a22] border border-[#ff2a6d]/70 rounded-xl p-4 text-sm text-[#ff2a6d] text-center">
+                <strong>NeonXurge is best experienced on desktop.</strong><br />
+                You can still play on mobile, but controls are optimized for keyboard.
+              </div>
             )}
           </div>
 
@@ -4726,35 +4800,35 @@ export default function NeonSurgeGame() {
           <div className="flex flex-col items-center gap-4">
             <button
               onClick={startSelectedStage}
-              className="neon-button text-2xl px-16 py-5 font-display tracking-[4px] rounded"
+              className="neon-button text-xl sm:text-2xl px-10 sm:px-16 py-4 sm:py-5 font-display tracking-[3px] sm:tracking-[4px] rounded w-full max-w-[320px]"
             >
               START GAME
             </button>
 
             <button
               onClick={() => setShowEquipment(true)}
-              className="px-12 py-3 rounded-xl border-2 border-[#c026ff] text-[#c026ff] hover:bg-[#c026ff] hover:text-black transition-all font-display tracking-[3px] text-lg"
+              className="w-full max-w-[320px] mx-auto px-8 sm:px-12 py-2.5 sm:py-3 rounded-xl border-2 border-[#c026ff] text-[#c026ff] hover:bg-[#c026ff] hover:text-black transition-all font-display tracking-[2px] sm:tracking-[3px] text-base sm:text-lg"
             >
               EQUIPMENT
             </button>
 
-            {/* NEW: Blockchain Features */}
+            {/* Blockchain Features */}
             <div className="flex gap-4">
               <button
                 onClick={() => { setShowLeaderboard(true); fetchOnChainLeaderboard(); }}
-                className="px-10 py-2.5 rounded-xl border-2 border-[#00f9ff] text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black transition-all font-display tracking-[3px] text-base"
+                className="px-4 sm:px-10 py-2.5 rounded-xl border-2 border-[#00f9ff] text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black transition-all font-display tracking-[3px] text-sm sm:text-base"
               >
                 LEADERBOARD
               </button>
               <button
                 onClick={() => setShowNFT(true)}
-                className="px-10 py-2.5 rounded-xl border-2 border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black transition-all font-display tracking-[3px] text-base"
+                className="px-4 sm:px-10 py-2.5 rounded-xl border-2 border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black transition-all font-display tracking-[3px] text-sm sm:text-base"
               >
                 NFT COLLECTION
               </button>
             </div>
 
-            <div className="flex gap-6 mt-2">
+            <div className="flex gap-4 sm:gap-6 mt-2">
               <button 
                 onClick={() => setShowHowToPlay(true)}
                 className="text-sm text-[#9ca3af] hover:text-white tracking-wider"
@@ -4800,14 +4874,14 @@ export default function NeonSurgeGame() {
 
         {/* ==================== LEADERBOARD (On-Chain via Wagmi) ==================== */}
         {showLeaderboard && (
-          <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/95 backdrop-blur-md p-4" onClick={() => setShowLeaderboard(false)}>
-            <div className="w-full max-w-[820px] hud-panel p-8 rounded-2xl border border-[#00f9ff]/30" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-6">
+          <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/95 backdrop-blur-md p-3 sm:p-4" onClick={() => setShowLeaderboard(false)}>
+            <div className="w-full max-w-[820px] hud-panel p-4 sm:p-6 md:p-8 rounded-2xl border border-[#00f9ff]/30 max-h-[95vh] overflow-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
                 <div>
-                  <div className="font-display text-4xl tracking-[-1px] neon-cyan">ON-CHAIN LEADERBOARD</div>
-                  <div className="text-xs text-[#6b7280] tracking-[3px] mt-1">SEPOLIA • PERMANENT SCORES</div>
+                  <div className="font-display text-2xl sm:text-3xl md:text-4xl tracking-[-1px] neon-cyan">ON-CHAIN LEADERBOARD</div>
+                  <div className="text-[10px] sm:text-xs text-[#6b7280] tracking-[3px] mt-1">SEPOLIA • PERMANENT SCORES</div>
                 </div>
-                <button onClick={() => setShowLeaderboard(false)} className="text-[#6b7280] hover:text-white text-2xl">×</button>
+                <button onClick={() => setShowLeaderboard(false)} className="text-[#6b7280] hover:text-white text-xl sm:text-2xl">×</button>
               </div>
 
               <div className="mb-4 flex items-center gap-3">
@@ -4827,30 +4901,36 @@ export default function NeonSurgeGame() {
                     {isSubmittingScore ? 'SUBMITTING TX...' : `SUBMIT RUN SCORE (${lastRunScore})`}
                   </button>
                 )}
-                {!isConnected && <div className="text-xs text-[#ff2a6d]">Connect wallet to submit scores on-chain</div>}
+                {!isConnected && <div className="text-xs text-[#ff2a6d]">{LOCKED_FEATURE_MESSAGE}</div>}
               </div>
 
               <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a35] overflow-hidden">
-                <div className="grid grid-cols-12 px-4 py-2 text-[10px] tracking-[2px] text-[#6b7280] border-b border-[#2a2a35]">
+                <div className="hidden sm:grid grid-cols-12 px-4 py-2 text-[10px] tracking-[2px] text-[#6b7280] border-b border-[#2a2a35]">
                   <div className="col-span-1">#</div>
                   <div className="col-span-6">WALLET</div>
                   <div className="col-span-3 text-right">SCORE</div>
                   <div className="col-span-2 text-right">TIME</div>
                 </div>
                 {leaderboardScores.length === 0 && (
-                  <div className="p-8 text-center text-[#6b7280] text-sm">No on-chain scores yet. Be the first legend.</div>
+                  <div className="p-6 sm:p-8 text-center text-[#6b7280] text-sm">No on-chain scores yet. Be the first legend.</div>
                 )}
                 {leaderboardScores.map((entry, idx) => (
-                  <div key={idx} className="grid grid-cols-12 px-4 py-3 text-sm border-b border-[#1f1f28] last:border-0 hover:bg-[#111117]">
-                    <div className="col-span-1 text-[#00f9ff] font-mono">{idx + 1}</div>
-                    <div className="col-span-6 font-mono text-[#00f9ff]">{entry.player}</div>
-                    <div className="col-span-3 text-right font-display text-lg text-white tracking-tighter">{entry.score.toLocaleString()}</div>
-                    <div className="col-span-2 text-right text-xs text-[#6b7280]">{new Date(entry.timestamp).toLocaleDateString()}</div>
+                  <div key={idx} className="flex flex-col sm:grid sm:grid-cols-12 px-4 py-2.5 sm:py-3 text-sm border-b border-[#1f1f28] last:border-0 hover:bg-[#111117]">
+                    {/* Mobile stacked view */}
+                    <div className="flex sm:hidden justify-between text-xs mb-0.5">
+                      <span className="font-mono text-[#00f9ff]">#{idx + 1}</span>
+                      <span className="text-[#6b7280]">{new Date(entry.timestamp).toLocaleDateString()}</span>
+                    </div>
+
+                    <div className="col-span-1 hidden sm:block text-[#00f9ff] font-mono">{idx + 1}</div>
+                    <div className="col-span-6 font-mono text-[#00f9ff] truncate">{entry.player}</div>
+                    <div className="col-span-3 text-right font-display text-base sm:text-lg text-white tracking-tighter">{entry.score.toLocaleString()}</div>
+                    <div className="col-span-2 hidden sm:block text-right text-xs text-[#6b7280]">{new Date(entry.timestamp).toLocaleDateString()}</div>
                   </div>
                 ))}
               </div>
 
-              <div className="mt-4 text-[10px] text-center text-[#6b7280]">Scores stored permanently via smart contract events on Sepolia. Top 10 shown (highest per address).</div>
+              <div className="mt-3 sm:mt-4 text-[9px] sm:text-[10px] text-center text-[#6b7280]">Scores stored permanently via smart contract events on Sepolia. Top 10 shown (highest per address).</div>
             </div>
           </div>
         )}
@@ -4858,31 +4938,31 @@ export default function NeonSurgeGame() {
         {/* ==================== NFT COLLECTION + MINT (ERC-721) ==================== */}
         {showNFT && (
           <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/95 backdrop-blur-md p-4" onClick={() => { setShowNFT(false); setMintSuccess(null); }}>
-            <div className="w-full max-w-[860px] hud-panel p-8 rounded-2xl border border-[#ff2a6d]/30" onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-start mb-6">
+            <div className="w-full max-w-[860px] hud-panel p-3 sm:p-5 md:p-8 rounded-2xl border border-[#ff2a6d]/30 max-h-[95vh] overflow-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-start mb-4 sm:mb-6">
                 <div>
-                  <div className="font-display text-4xl tracking-[-1px] neon-pink">NEONXURGE SURVIVOR</div>
-                  <div className="text-xs tracking-[4px] text-[#ff2a6d]/80 mt-1">ERC-721 • SEPOLIA</div>
+                  <div className="font-display text-2xl sm:text-3xl md:text-4xl tracking-[-1px] neon-pink">NEONXURGE SURVIVOR</div>
+                  <div className="text-[10px] sm:text-xs tracking-[4px] text-[#ff2a6d]/80 mt-1">ERC-721 • SEPOLIA</div>
                 </div>
-                <button onClick={() => { setShowNFT(false); setMintSuccess(null); }} className="text-3xl text-[#6b7280] hover:text-white">×</button>
+                <button onClick={() => { setShowNFT(false); setMintSuccess(null); }} className="text-2xl sm:text-3xl text-[#6b7280] hover:text-white leading-none">×</button>
               </div>
 
               {/* Mint Success Celebration */}
               {mintSuccess && (
-                <div className="mb-8 p-6 rounded-2xl bg-gradient-to-br from-[#ff2a6d]/10 to-black border border-[#ff2a6d]/40 text-center">
-                  <div className="text-6xl mb-2">✧</div>
-                  <div className="font-display text-3xl neon-pink tracking-widest mb-1">MINTED SUCCESSFULLY</div>
-                  <div className="text-[#ff2a6d] text-lg mb-3">
+                <div className="mb-6 p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-[#ff2a6d]/10 to-black border border-[#ff2a6d]/40 text-center">
+                  <div className="text-4xl sm:text-6xl mb-2">✧</div>
+                  <div className="font-display text-xl sm:text-3xl neon-pink tracking-widest mb-1">MINTED SUCCESSFULLY</div>
+                  <div className="text-[#ff2a6d] text-base sm:text-lg mb-3">
                     {NFT_TIERS[mintSuccess.tier]?.label} TIER
                     {typeof mintSuccess.tokenId === 'number' ? ` #${mintSuccess.tokenId}` : ''}
                     {mintSuccess.stageCleared ? ` • Stage ${mintSuccess.stageCleared}` : ''}
                   </div>
-                  <div className="font-mono text-xs text-[#9ca3af] break-all mb-3">TX: {mintSuccess.txHash}</div>
+                  <div className="font-mono text-[10px] sm:text-xs text-[#9ca3af] break-all mb-3">TX: {mintSuccess.txHash}</div>
                   <a
                     href={`https://sepolia.etherscan.io/tx/${mintSuccess.txHash}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-block px-6 py-2 text-sm border border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black tracking-widest"
+                    className="inline-block px-4 py-1.5 sm:px-6 sm:py-2 text-xs sm:text-sm border border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black tracking-widest"
                   >
                     VIEW ON ETHERSCAN
                   </a>
@@ -4890,13 +4970,13 @@ export default function NeonSurgeGame() {
               )}
 
               {/* Mint Button / Eligibility */}
-              <div className="mb-8">
+              <div className="mb-5 sm:mb-8">
                 {mintEligibility.eligible ? (
                   <>
                     <button
                       onClick={mintSurvivorNFT}
                       disabled={isMinting || !isConnected}
-                      className="w-full py-5 text-xl font-display tracking-[4px] rounded-xl bg-[#ff2a6d] text-black hover:bg-white disabled:bg-[#3a1f25] disabled:text-[#ff2a6d]/60 transition-all"
+                      className="w-full py-3 sm:py-5 text-lg sm:text-xl font-display tracking-[4px] rounded-xl bg-[#ff2a6d] text-black hover:bg-white disabled:bg-[#3a1f25] disabled:text-[#ff2a6d]/60 transition-all"
                     >
                       {isMinting ? 'MINTING ON SEPOLIA...' : `MINT ${NFT_TIERS[mintEligibility.tier]?.label} NFT`}
                     </button>
@@ -4910,49 +4990,49 @@ export default function NeonSurgeGame() {
                     )}
                   </>
                 ) : (
-                  <div className="text-center py-4 text-[#6b7280] border border-[#2a2a35] rounded-xl">
+                  <div className="text-center py-3 sm:py-4 text-xs sm:text-sm text-[#6b7280] border border-[#2a2a35] rounded-xl">
                     Clear Stage 10 or score 5000+ in a run to unlock NFT minting.
                   </div>
                 )}
                 {isConnected && mintEligibility.eligible && (
                   <div className="text-center text-xs text-[#ff2a6d] mt-2 tracking-widest">{mintEligibility.reason}</div>
                 )}
-                {!isConnected && <div className="text-center text-xs text-[#ff2a6d] mt-2">Connect wallet to mint</div>}
+                {!isConnected && <div className="text-center text-xs text-[#ff2a6d] mt-2">{LOCKED_FEATURE_MESSAGE}</div>}
               </div>
 
               {/* Your Collection */}
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-xs tracking-[3px] text-[#6b7280]">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
+                  <div className="text-[10px] sm:text-xs tracking-[3px] text-[#6b7280]">
                     YOUR SURVIVORS ({myNFTs.length})
                   </div>
-                  {!IS_DEMO_MODE && isConnected && (
+                  {!isGuestMode && isConnected && (
                     <button
                       onClick={syncNFTCollectionWithChain}
                       disabled={isRefreshingNFTs}
-                      className="text-[10px] px-3 py-1 rounded border border-[#00f9ff]/60 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black disabled:opacity-50 tracking-[1px] transition-all"
+                      className="text-[9px] sm:text-[10px] px-2 sm:px-3 py-1 rounded border border-[#00f9ff]/60 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black disabled:opacity-50 tracking-[1px] transition-all"
                     >
                       {isRefreshingNFTs ? 'SYNCING...' : 'SYNC / DISCOVER ON-CHAIN'}
                     </button>
                   )}
                 </div>
                 {myNFTs.length === 0 ? (
-                  <div className="text-sm text-[#6b7280] py-8 text-center border border-[#1f1f28] rounded">
+                  <div className="text-xs sm:text-sm text-[#6b7280] py-6 sm:py-8 text-center border border-[#1f1f28] rounded">
                     No NFTs yet. Survive Stage 10 or use the <span className="text-[#00f9ff]">SYNC / DISCOVER ON-CHAIN</span> button to find badges sent to you.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
                     {myNFTs.map((nft, i) => {
                       const tierInfo = NFT_TIERS[nft.tier];
                       const stageInfo = nft.stageCleared ? ` • Stage ${nft.stageCleared}` : '';
                       const tokenLabel = typeof nft.tokenId === 'number' ? ` #${nft.tokenId}` : '';
                       return (
-                        <div key={i} className="p-4 rounded-xl border border-[#2a2a35] bg-[#0a0a0f] flex flex-col">
-                          <div className="font-display text-xl" style={{ color: tierInfo?.color }}>
+                        <div key={i} className="p-2.5 sm:p-3 rounded-lg border border-[#2a2a35] bg-[#0a0a0f] flex flex-col">
+                          <div className="font-display text-sm sm:text-lg" style={{ color: tierInfo?.color }}>
                             {tierInfo?.label || 'SURVIVOR'}{tokenLabel}
                           </div>
-                          <div className="text-xs text-[#6b7280] mt-1 mb-3 flex-1">{tierInfo?.desc}{stageInfo}</div>
-                          <a href={`https://sepolia.etherscan.io/tx/${nft.txHash}`} target="_blank" className="text-[10px] text-[#00f9ff] hover:underline font-mono">VIEW TX →</a>
+                          <div className="text-[9px] sm:text-[10px] text-[#6b7280] mt-0.5 mb-1.5 flex-1 leading-tight">{tierInfo?.desc}{stageInfo}</div>
+                          <a href={`https://sepolia.etherscan.io/tx/${nft.txHash}`} target="_blank" className="text-[9px] text-[#00f9ff] hover:underline font-mono">VIEW TX →</a>
                         </div>
                       );
                     })}
@@ -4966,18 +5046,18 @@ export default function NeonSurgeGame() {
         {/* ==================== EQUIPMENT SCREEN ==================== */}
         {showEquipment && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/95 backdrop-blur-md p-4">
-            <div className="w-full max-w-[1100px] relative hud-panel p-5 rounded-2xl border border-[#c026ff]/30 max-h-[92vh] flex flex-col">
+            <div className="w-full max-w-[1100px] relative hud-panel p-3 sm:p-5 rounded-2xl border border-[#c026ff]/30 max-h-[95vh] flex flex-col">
               {/* Header with close button */}
               <div className="flex items-center justify-between mb-3 flex-shrink-0">
                 <div>
-                  <div className="font-display text-4xl md:text-5xl font-black tracking-[-2px] text-[#c026ff]">EQUIPMENT</div>
-                  <div className="flex items-center gap-4 mt-0.5">
-                    <div className="text-lg text-[#ff2a6d]">
-                      <span>◆</span> {neonShards} <span className="text-xs tracking-widest">NEON SHARDS</span>
+                  <div className="font-display text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black tracking-[-1px] sm:tracking-[-2px] text-[#c026ff]">EQUIPMENT</div>
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1 text-sm sm:text-lg">
+                    <div className="text-[#ff2a6d]">
+                      <span>◆</span> {neonShards} <span className="text-[10px] sm:text-xs tracking-widest">NEON SHARDS</span>
                     </div>
                     {isConnected && (
-                      <div className="text-lg text-[#c026ff] font-mono">
-                        {isLoadingNshBalance ? '...' : (Number(nshBalance) / 1e18).toFixed(0)} <span className="text-xs tracking-widest">NSH</span>
+                      <div className="text-[#c026ff] font-mono text-sm sm:text-lg">
+                        {isLoadingNshBalance ? '...' : (Number(nshBalance) / 1e18).toFixed(0)} <span className="text-[10px] sm:text-xs tracking-widest">NSH</span>
                       </div>
                     )}
                   </div>
@@ -4986,13 +5066,13 @@ export default function NeonSurgeGame() {
                 {/* Back Button */}
                 <button
                   onClick={() => setShowEquipment(false)}
-                  className="px-5 py-1.5 rounded-lg bg-[#c026ff] text-black hover:bg-white transition-all text-sm font-medium tracking-[2px]"
+                  className="px-4 py-1 sm:px-5 sm:py-1.5 rounded-lg bg-[#c026ff] text-black hover:bg-white transition-all text-xs sm:text-sm font-medium tracking-[2px]"
                 >
-                  BACK TO MENU
+                  BACK
                 </button>
               </div>
 
-              <div className="flex-1 min-h-0 grid grid-cols-2 md:grid-cols-3 gap-3 overflow-hidden">
+              <div className="flex-1 min-h-0 grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 overflow-auto">
                 {Object.entries(EQUIPMENT).map(([key, data]) => {
                   const level = getEquipLevel(key as keyof typeof equipmentLevels);
                   const cost = getUpgradeCost(level);
@@ -5005,21 +5085,21 @@ export default function NeonSurgeGame() {
                   const canUpgrade = level < 10 && (canUpgradeWithShards || hasEnoughNsh);
 
                   return (
-                    <div key={key} className="hud-panel p-4 rounded-xl border border-[#2a2a35] hover:border-[#c026ff]/50 transition-all flex flex-col">
-                      <div className="flex justify-between items-start mb-2">
+                    <div key={key} className="hud-panel p-3 sm:p-4 rounded-xl border border-[#2a2a35] hover:border-[#c026ff]/50 transition-all flex flex-col">
+                      <div className="flex justify-between items-start mb-1.5">
                         <div className="flex items-center gap-2">
-                          <span className="text-3xl">{data.icon}</span>
+                          <span className="text-2xl sm:text-3xl">{data.icon}</span>
                           <div>
-                            <div className="font-display text-lg tracking-tight leading-tight">{data.name}</div>
-                            <div className="text-[10px] text-[#6b7280] tracking-widest">{data.slot}</div>
+                            <div className="font-display text-base sm:text-lg tracking-tight leading-tight">{data.name}</div>
+                            <div className="text-[9px] sm:text-[10px] text-[#6b7280] tracking-widest">{data.slot}</div>
                           </div>
                         </div>
-                        <div className="text-right text-xs text-[#c026ff] tracking-widest">LV {level}/10</div>
+                        <div className="text-right text-[10px] sm:text-xs text-[#c026ff] tracking-widest">LV {level}/10</div>
                       </div>
 
-                      <div className="text-[#a1a1aa] text-xs mb-2 leading-tight flex-1">{data.description}</div>
+                      <div className="text-[#a1a1aa] text-[10px] sm:text-xs mb-1.5 leading-tight flex-1">{data.description}</div>
 
-                      <div className="text-[#00f9ff] text-xs mb-2 font-mono tracking-wider">{stats}</div>
+                      <div className="text-[#00f9ff] text-[10px] sm:text-xs mb-1.5 font-mono tracking-wider">{stats}</div>
 
                       {level < 10 ? (
                         <button
@@ -5167,13 +5247,19 @@ export default function NeonSurgeGame() {
           </div>
         )}
 
-        {/* Canvas with neon frame */}
-        <div className="game-frame scanlines">
+        {/* Responsive Canvas Container - maintains 4:3 aspect ratio */}
+        <div 
+          className="relative w-full max-w-[800px] mx-auto game-frame scanlines"
+          style={{ aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}` }}
+        >
           <canvas
             ref={canvasRef}
             width={CANVAS_WIDTH}
             height={CANVAS_HEIGHT}
-            className="block rounded-[1px] bg-black"
+            className="absolute inset-0 w-full h-full rounded-[1px] bg-black touch-none"
+            onTouchStart={handleTouchInput}
+            onTouchMove={handleTouchInput}
+            onTouchEnd={() => { touchTargetRef.current = null; }}
           />
         </div>
 
