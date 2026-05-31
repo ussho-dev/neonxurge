@@ -12,7 +12,7 @@ import {
   LEADERBOARD_ABI,
   NFT_ABI,
   NFT_TIERS,
-  NSH_ADDRESS,
+  XURGE_ADDRESS,
   ERC20_ABI,
   IS_DEMO_MODE,
 } from '../lib/wagmi';
@@ -614,6 +614,258 @@ function circleCollide(
   return dist2(ax, ay, bx, by) < r * r;
 }
 
+// ==================== SOUND MANAGER ====================
+class SoundManager {
+  private ctx: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
+  private enabled = true;
+  private volume = 0.8;
+
+  private getContext(): AudioContext {
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = this.volume;
+      this.masterGain.connect(this.ctx.destination);
+    }
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    return this.ctx;
+  }
+
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+    if (this.masterGain) {
+      this.masterGain.gain.value = enabled ? this.volume : 0.0001;
+    }
+  }
+
+  setVolume(v: number) {
+    this.volume = Math.max(0.05, Math.min(1.2, v));
+    if (this.masterGain && this.enabled) {
+      this.masterGain.gain.value = this.volume;
+    }
+  }
+
+  play(name: string, options: { volume?: number; pitch?: number } = {}) {
+    if (!this.enabled) return;
+
+    try {
+      const ctx = this.getContext();
+      const t = ctx.currentTime;
+      const vol = (options.volume ?? 1) * this.volume;
+      const pitch = options.pitch ?? 1;
+
+      switch (name) {
+        case 'shoot':
+          this.playShoot(ctx, t, vol, pitch);
+          break;
+        case 'enemyDeath':
+        case 'enemyDeathTank':
+        case 'enemyDeathShooter':
+          this.playEnemyDeath(ctx, t, vol, pitch, name);
+          break;
+        case 'level':
+        case 'levelUp':
+          this.playLevelUp(ctx, t, vol);
+          break;
+        case 'bossAppear':
+          this.playBossAppear(ctx, t, vol);
+          break;
+        case 'stageClear':
+          this.playStageClear(ctx, t, vol);
+          break;
+        case 'gameOver':
+        case 'death':
+          this.playGameOver(ctx, t, vol);
+          break;
+        case 'buttonClick':
+          this.playButtonClick(ctx, t, vol);
+          break;
+        case 'hit':
+          this.playHit(ctx, t, vol);
+          break;
+        case 'collect':
+          this.playCollect(ctx, t, vol);
+          break;
+        default:
+          this.playButtonClick(ctx, t, vol * 0.6);
+      }
+    } catch {
+      // Silent fallback
+    }
+  }
+
+  private playShoot(ctx: AudioContext, t: number, vol: number, pitch: number) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 1050 * pitch;
+    filter.type = 'lowpass';
+    filter.frequency.value = 2800;
+    gain.gain.value = 0.085 * vol;
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.frequency.linearRampToValueAtTime(420 * pitch, t + 0.07);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 0.13);
+    osc.stop(t + 0.15);
+  }
+
+  private playHit(ctx: AudioContext, t: number, vol: number) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 145;
+    gain.gain.value = 0.11 * vol;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 0.17);
+    osc.stop(t + 0.19);
+  }
+
+  private playCollect(ctx: AudioContext, t: number, vol: number) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 980;
+    gain.gain.value = 0.09 * vol;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.frequency.exponentialRampToValueAtTime(1520, t + 0.1);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 0.2);
+    osc.stop(t + 0.22);
+  }
+
+  private playEnemyDeath(ctx: AudioContext, t: number, vol: number, pitch: number, variant: string) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = variant === 'enemyDeathShooter' ? 'square' : 'sawtooth';
+    osc.frequency.value = (variant === 'enemyDeathShooter' ? 280 : 95) * pitch;
+    gain.gain.value = (variant === 'enemyDeathShooter' ? 0.13 : 0.22) * vol;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    const endFreq = variant === 'enemyDeathShooter' ? 95 : 28;
+    osc.frequency.linearRampToValueAtTime(endFreq * pitch, t + (variant === 'enemyDeathShooter' ? 0.4 : 0.65));
+    gain.gain.linearRampToValueAtTime(0.0001, t + (variant === 'enemyDeathShooter' ? 0.55 : 0.8));
+    osc.stop(t + (variant === 'enemyDeathShooter' ? 0.57 : 0.82));
+  }
+
+  private playLevelUp(ctx: AudioContext, t: number, vol: number) {
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc1.type = 'sine';
+    osc2.type = 'sine';
+    osc1.frequency.value = 620;
+    osc2.frequency.value = 780;
+    gain.gain.value = 0.09 * vol;
+
+    const g = ctx.createGain();
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(g);
+    g.connect(ctx.destination);
+
+    osc1.start(t);
+    osc2.start(t);
+    osc1.frequency.linearRampToValueAtTime(980, t + 0.14);
+    osc1.frequency.linearRampToValueAtTime(1520, t + 0.32);
+    osc2.frequency.linearRampToValueAtTime(1240, t + 0.28);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 0.55);
+    osc1.stop(t + 0.58);
+    osc2.stop(t + 0.58);
+  }
+
+  private playBossAppear(ctx: AudioContext, t: number, vol: number) {
+    // Deep rumbling boss entrance
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 48;
+    filter.type = 'lowpass';
+    filter.frequency.value = 420;
+    gain.gain.value = 0.35 * vol;
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.frequency.linearRampToValueAtTime(72, t + 1.2);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 1.6);
+    osc.stop(t + 1.65);
+  }
+
+  private playStageClear(ctx: AudioContext, t: number, vol: number) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 720;
+    gain.gain.value = 0.1 * vol;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.frequency.linearRampToValueAtTime(980, t + 0.18);
+    osc.frequency.linearRampToValueAtTime(1420, t + 0.38);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 0.7);
+    osc.stop(t + 0.72);
+  }
+
+  private playGameOver(ctx: AudioContext, t: number, vol: number) {
+    // Dramatic descending game over
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 180;
+    filter.type = 'lowpass';
+    filter.frequency.value = 1200;
+    gain.gain.value = 0.32 * vol;
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.frequency.linearRampToValueAtTime(42, t + 1.4);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 1.8);
+    osc.stop(t + 1.85);
+  }
+
+  private playButtonClick(ctx: AudioContext, t: number, vol: number) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.06 * vol;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    gain.gain.linearRampToValueAtTime(0.0001, t + 0.08);
+    osc.stop(t + 0.1);
+  }
+}
+
 // ==================== MAIN COMPONENT ====================
 export default function NeonSurgeGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -657,6 +909,11 @@ export default function NeonSurgeGame() {
 
   // Mobile detection for responsive UI + warning banner
   const [isSmallScreen, setIsSmallScreen] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
+
+  // Computed for aggressive portrait phone optimizations
+  const isPhonePortrait = isSmallScreen && isPortrait;
+  const uiScaleRef = useRef(1);
 
   // === Equipment System ===
   const [neonShards, setNeonShards] = useState(0);
@@ -676,12 +933,67 @@ export default function NeonSurgeGame() {
   const [isNftContractOwner, setIsNftContractOwner] = useState(false);
   const [isRefreshingNFTs, setIsRefreshingNFTs] = useState(false);
 
-  // ==================== NSH (Neon Shard) TOKEN STATE ====================
-  const [nshBalance, setNshBalance] = useState(0n);
-  const [pendingNshRewards, setPendingNshRewards] = useState(0n);
-  const [isLoadingNshBalance, setIsLoadingNshBalance] = useState(false);
-  const [isNshTxPending, setIsNshTxPending] = useState(false);
-  const [lastNshTxHash, setLastNshTxHash] = useState<string | null>(null);
+  // ==================== ACHIEVEMENTS SYSTEM ====================
+  const ACHIEVEMENTS = [
+    { id: 'firstBlood', name: 'First Blood', desc: 'Kill your first enemy', reward: 25 },
+    { id: 'survivor', name: 'Survivor', desc: 'Clear Stage 1', reward: 50 },
+    { id: 'bossSlayer', name: 'Boss Slayer', desc: 'Defeat your first boss', reward: 75 },
+    { id: 'stageMaster', name: 'Stage Master', desc: 'Clear Stage 5', reward: 100 },
+    { id: 'legendary', name: 'Legendary', desc: 'Clear Stage 10', reward: 250 },
+    { id: 'speedDemon', name: 'Speed Demon', desc: 'Clear any stage under 2 minutes', reward: 80 },
+    { id: 'untouchable', name: 'Untouchable', desc: 'Clear a stage without taking damage', reward: 120 },
+    { id: 'upgradeMaster', name: 'Upgrade Master', desc: 'Reach level 10 in one run', reward: 60 },
+    { id: 'fusionExpert', name: 'Fusion Expert', desc: 'Perform 5 fusions in one run', reward: 90 },
+    { id: 'collector', name: 'Collector', desc: 'Own 5 different NFTs', reward: 150 },
+    // New multi-step achievements
+    { id: 'kill50', name: 'Enemy Slayer I', desc: 'Kill 50 enemies', target: 50, reward: 40 },
+    { id: 'kill100', name: 'Enemy Slayer II', desc: 'Kill 100 enemies', target: 100, reward: 60 },
+    { id: 'kill500', name: 'Enemy Slayer III', desc: 'Kill 500 enemies', target: 500, reward: 100 },
+    { id: 'level20', name: 'Rising Star', desc: 'Reach level 20 in one run', target: 20, reward: 50 },
+    { id: 'level30', name: 'Veteran', desc: 'Reach level 30 in one run', target: 30, reward: 80 },
+    { id: 'xp100', name: 'XP Hunter I', desc: 'Collect 100 XP orbs', target: 100, reward: 30 },
+    { id: 'xp500', name: 'XP Hunter II', desc: 'Collect 500 XP orbs', target: 500, reward: 50 },
+    { id: 'xp1000', name: 'XP Hunter III', desc: 'Collect 1000 XP orbs', target: 1000, reward: 80 },
+    { id: 'fusion10', name: 'Fusion Apprentice', desc: 'Perform 10 fusions', target: 10, reward: 50 },
+    { id: 'fusion25', name: 'Fusion Master', desc: 'Perform 25 fusions', target: 25, reward: 80 },
+    { id: 'stages5', name: 'Seasoned Survivor', desc: 'Clear 5 stages (lifetime)', target: 5, reward: 60 },
+    { id: 'stages10', name: 'Veteran Clearer', desc: 'Clear 10 stages (lifetime)', target: 10, reward: 100 },
+  ];
+
+  const [unlockedAchievements, setUnlockedAchievements] = useState<string[]>([]);
+  const [achievementProgress, setAchievementProgress] = useState<Record<string, number>>({});
+  const [showAchievements, setShowAchievements] = useState(false);
+
+  // ==================== DAILY REWARDS SYSTEM ====================
+  const [dailyRewardData, setDailyRewardData] = useState<{ lastClaimDate: string; streak: number }>({ lastClaimDate: '', streak: 0 });
+  const [showDailyReward, setShowDailyReward] = useState(false);
+  const [claimedReward, setClaimedReward] = useState<{ day: number; nsh: number; gotNFT?: boolean } | null>(null);
+
+  // Token Info Modal
+  const [showTokenInfo, setShowTokenInfo] = useState(false);
+
+  // Per-run achievement tracking
+  const runFusionsRef = useRef(0);
+  const runMaxLevelRef = useRef(1);
+  const runDamageTakenRef = useRef(0);
+  const runStartTimeRef = useRef(Date.now());
+  const runEnemiesKilledRef = useRef(0);
+  const firstBloodUnlockedRef = useRef(false);
+
+  // Lifetime achievement progress tracking
+  const lifetimeKillsRef = useRef(0);
+  const lifetimeFusionsRef = useRef(0);
+  const lifetimeXpRef = useRef(0);
+  const lifetimeStagesClearedRef = useRef(0);
+  const lifetimeHighestLevelRef = useRef(1);
+
+  // ==================== $XURGE (Utility Token) STATE ====================
+  // On-chain $XURGE balance and pending rewards (Play-to-Earn / Utility token)
+  const [xurgeBalance, setXurgeBalance] = useState(0n);
+  const [pendingXurgeRewards, setPendingXurgeRewards] = useState(0n);
+  const [isLoadingXurgeBalance, setIsLoadingXurgeBalance] = useState(false);
+  const [isXurgeTxPending, setIsXurgeTxPending] = useState(false);
+  const [lastXurgeTxHash, setLastXurgeTxHash] = useState<string | null>(null);
 
   const [equipmentLevels, setEquipmentLevels] = useState({
     neonRifle: 0,
@@ -697,6 +1009,170 @@ export default function NeonSurgeGame() {
     setNeonShards(amount);
     if (typeof window !== 'undefined') {
       localStorage.setItem('neonSurgeShards', amount.toString());
+    }
+  };
+
+  // Save Achievements
+  const saveAchievements = (achievements: string[]) => {
+    setUnlockedAchievements(achievements);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('neonSurgeAchievements', JSON.stringify(achievements));
+    }
+  };
+
+  const saveAchievementProgress = (progress: Record<string, number>) => {
+    setAchievementProgress(progress);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('neonSurgeAchievementProgress', JSON.stringify(progress));
+    }
+  };
+
+  const saveLifetimeStats = () => {
+    if (typeof window !== 'undefined') {
+      const stats = {
+        kills: lifetimeKillsRef.current,
+        fusions: lifetimeFusionsRef.current,
+        xp: lifetimeXpRef.current,
+        stages: lifetimeStagesClearedRef.current,
+        highestLevel: lifetimeHighestLevelRef.current,
+      };
+      localStorage.setItem('neonSurgeLifetimeStats', JSON.stringify(stats));
+    }
+  };
+
+  // ==================== DAILY REWARD HELPERS ====================
+  const getTodayUTC = () => {
+    const now = new Date();
+    return now.toISOString().split('T')[0]; // YYYY-MM-DD in UTC
+  };
+
+  const isDailyRewardAvailable = () => {
+    const today = getTodayUTC();
+    return dailyRewardData.lastClaimDate !== today;
+  };
+
+  const getCurrentStreakDay = () => {
+    return Math.min(Math.max(dailyRewardData.streak, 1), 7);
+  };
+
+  const DAILY_REWARDS = [50, 100, 150, 200, 300, 400, 500] as const;
+
+  const claimDailyReward = () => {
+    if (!isDailyRewardAvailable()) return;
+
+    const today = getTodayUTC();
+    let newStreak = dailyRewardData.streak || 0;
+
+    // Check if yesterday to continue streak
+    const yesterday = new Date();
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    if (dailyRewardData.lastClaimDate === yesterdayStr) {
+      newStreak = Math.min(newStreak + 1, 7);
+    } else {
+      newStreak = 1; // reset streak
+    }
+
+    const day = newStreak;
+    const nshReward = DAILY_REWARDS[day - 1];
+
+    let gotNFT = false;
+
+    if (day === 7) {
+      // 25% chance for Rare NFT (tier 1)
+      if (Math.random() < 0.25) {
+        gotNFT = true;
+        const newNFT = {
+          tier: 1 as 0 | 1 | 2,
+          txHash: 'daily-' + Date.now(),
+          time: Date.now(),
+          stageCleared: 0,
+          tokenId: Date.now() % 100000, // fake unique id
+        };
+        const updated = [newNFT, ...myNFTs].slice(0, 12);
+        saveMyNFTs(updated);
+      }
+    }
+
+    // Award Neon Shards (soft currency)
+    const newShards = neonShards + nshReward;
+    saveNeonShards(newShards);
+
+    // Update data
+    const newData = { lastClaimDate: today, streak: newStreak };
+    setDailyRewardData(newData);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('neonSurgeDailyReward', JSON.stringify(newData));
+    }
+
+    // Show claim animation modal
+    setClaimedReward({ day, nsh: nshReward, gotNFT });
+    setShowDailyReward(true);
+
+    // Play nice sound
+    playSound('level', { volume: 1.0 });
+    if (gotNFT) {
+      setTimeout(() => playSound('stageClear', { volume: 0.8 }), 400);
+    }
+  };
+
+  const unlockAchievement = (id: string) => {
+    if (unlockedAchievements.includes(id)) return;
+
+    const achievement = ACHIEVEMENTS.find(a => a.id === id);
+    if (!achievement) return;
+
+    const newUnlocked = [...unlockedAchievements, id];
+    saveAchievements(newUnlocked);
+
+    // Award Neon Shards (soft currency)
+    const newShards = neonShards + achievement.reward;
+    saveNeonShards(newShards);
+
+    // Play sound (subtle notification)
+    playSound('level', { volume: 0.7 });
+  };
+
+  const checkAndUnlockProgressAchievements = () => {
+    // Check kill milestones
+    const kills = lifetimeKillsRef.current;
+    if (kills >= 50) unlockAchievement('kill50');
+    if (kills >= 100) unlockAchievement('kill100');
+    if (kills >= 500) unlockAchievement('kill500');
+
+    // XP
+    const xp = lifetimeXpRef.current;
+    if (xp >= 100) unlockAchievement('xp100');
+    if (xp >= 500) unlockAchievement('xp500');
+    if (xp >= 1000) unlockAchievement('xp1000');
+
+    // Fusions
+    const fusions = lifetimeFusionsRef.current;
+    if (fusions >= 10) unlockAchievement('fusion10');
+    if (fusions >= 25) unlockAchievement('fusion25');
+
+    // Stages
+    const stages = lifetimeStagesClearedRef.current;
+    if (stages >= 5) unlockAchievement('stages5');
+    if (stages >= 10) unlockAchievement('stages10');
+  };
+
+  const incrementAchievementProgress = (id: string, amount: number = 1) => {
+    const achievement = ACHIEVEMENTS.find(a => a.id === id);
+    if (!achievement || !achievement.target) return;
+
+    const current = achievementProgress[id] || 0;
+    const newProgress = Math.min(current + amount, achievement.target);
+
+    if (newProgress !== current) {
+      const newProgressMap = { ...achievementProgress, [id]: newProgress };
+      saveAchievementProgress(newProgressMap);
+
+      // Check for unlock
+      if (newProgress >= achievement.target && !unlockedAchievements.includes(id)) {
+        unlockAchievement(id);
+      }
     }
   };
 
@@ -977,38 +1453,38 @@ export default function NeonSurgeGame() {
     }
   }, [publicClient, address]);
 
-  // ==================== NSH TOKEN HELPERS ====================
-  const refreshNshBalance = useCallback(async () => {
+  // ==================== $XURGE TOKEN HELPERS (Utility Token) ====================
+  const refreshXurgeBalance = useCallback(async () => {
     if (!publicClient || !address) {
-      setNshBalance(0n);
+      setXurgeBalance(0n);
       return;
     }
-    setIsLoadingNshBalance(true);
+    setIsLoadingXurgeBalance(true);
     try {
       const bal = await publicClient.readContract({
-        address: NSH_ADDRESS,
+        address: XURGE_ADDRESS,
         abi: ERC20_ABI,
         functionName: 'balanceOf',
         args: [address],
       }) as bigint;
-      setNshBalance(bal + pendingNshRewards);
+      setXurgeBalance(bal + pendingXurgeRewards);
     } catch (e) {
-      console.warn('Failed to read NSH balance:', e);
-      setNshBalance(pendingNshRewards);
+      console.warn('Failed to read $XURGE balance:', e);
+      setXurgeBalance(pendingXurgeRewards);
     } finally {
-      setIsLoadingNshBalance(false);
+      setIsLoadingXurgeBalance(false);
     }
-  }, [publicClient, address, pendingNshRewards]);
+  }, [publicClient, address, pendingXurgeRewards]);
 
-  // Auto-refresh NSH balance — only when NOT in an active game run to avoid console spam and potential interference during gameplay.
+  // Auto-refresh $XURGE balance — only when NOT in an active game run to avoid console spam and potential interference during gameplay.
   useEffect(() => {
     const shouldRefresh = isConnected && address && screen !== 'game';
     if (shouldRefresh) {
-      refreshNshBalance();
+      refreshXurgeBalance();
     } else if (!isConnected) {
-      setNshBalance(pendingNshRewards);
+      setXurgeBalance(pendingXurgeRewards);
     }
-  }, [isConnected, address, pendingNshRewards, refreshNshBalance, screen]);
+  }, [isConnected, address, pendingXurgeRewards, refreshXurgeBalance, screen]);
 
   // Fetch top scores from on-chain events (client-side sort of recent high scores)
   const fetchOnChainLeaderboard = useCallback(async () => {
@@ -1196,6 +1672,11 @@ export default function NeonSurgeGame() {
       setShowNFT(true);
       setShowStageClear(false);
 
+      // Check Collector achievement
+      if (myNFTs.length + 1 >= 5) {
+        unlockAchievement('collector');
+      }
+
       // Pull live data + run discovery scan for the new mint
       setTimeout(() => syncNFTCollectionWithChain(), 1200);
     } catch (err: any) {
@@ -1309,165 +1790,16 @@ export default function NeonSurgeGame() {
 
 
   // ==================== AUDIO (neon SFX) ====================
-  const playSound = useCallback((type: 'shoot' | 'hit' | 'collect' | 'death' | 'level' | 'stageClear' | 'enemyDeathTank' | 'enemyDeathShooter') => {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      const t = ctx.currentTime;
+  // Sound Manager instance
+  const soundManagerRef = useRef<SoundManager | null>(null);
+  if (!soundManagerRef.current) {
+    soundManagerRef.current = new SoundManager();
+  }
 
-      if (type === 'shoot') {
-        // Impactful cyberpunk laser
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const filter = ctx.createBiquadFilter();
-        osc.type = 'sawtooth';
-        osc.frequency.value = 1050;
-        filter.type = 'lowpass';
-        filter.frequency.value = 2800;
-        gain.gain.value = 0.085;
-
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(t);
-        osc.frequency.linearRampToValueAtTime(420, t + 0.07);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.13);
-        osc.stop(t + 0.15);
-      }
-
-      if (type === 'hit') {
-        // Sharp satisfying hit
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'square';
-        osc.frequency.value = 145;
-        gain.gain.value = 0.11;
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(t);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.17);
-        osc.stop(t + 0.19);
-      }
-
-      if (type === 'collect') {
-        // Pleasant cyberpunk ding
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 980;
-        gain.gain.value = 0.09;
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(t);
-        osc.frequency.exponentialRampToValueAtTime(1520, t + 0.1);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.2);
-        osc.stop(t + 0.22);
-      }
-
-      if (type === 'death') {
-        // Generic dramatic death
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const filter = ctx.createBiquadFilter();
-        osc.type = 'sawtooth';
-        osc.frequency.value = 210;
-        filter.type = 'lowpass';
-        filter.frequency.value = 780;
-        gain.gain.value = 0.26;
-
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(t);
-        osc.frequency.linearRampToValueAtTime(38, t + 0.9);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 1.05);
-        osc.stop(t + 1.1);
-      }
-
-      if (type === 'level') {
-        // Epic level up chime
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc1.type = 'sine';
-        osc2.type = 'sine';
-        osc1.frequency.value = 620;
-        osc2.frequency.value = 780;
-        gain.gain.value = 0.09;
-
-        const g = ctx.createGain();
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(g);
-        g.connect(ctx.destination);
-
-        osc1.start(t);
-        osc2.start(t);
-        osc1.frequency.linearRampToValueAtTime(980, t + 0.14);
-        osc1.frequency.linearRampToValueAtTime(1520, t + 0.32);
-        osc2.frequency.linearRampToValueAtTime(1240, t + 0.28);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.55);
-        osc1.stop(t + 0.58);
-        osc2.stop(t + 0.58);
-      }
-
-      if (type === 'stageClear') {
-        // Triumphant stage advance
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = 720;
-        gain.gain.value = 0.1;
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(t);
-        osc.frequency.linearRampToValueAtTime(980, t + 0.18);
-        osc.frequency.linearRampToValueAtTime(1420, t + 0.38);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.7);
-        osc.stop(t + 0.72);
-      }
-
-      if (type === 'enemyDeathTank') {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.value = 95;
-        gain.gain.value = 0.22;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.frequency.linearRampToValueAtTime(28, t + 0.65);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.8);
-        osc.stop(t + 0.82);
-      }
-
-      if (type === 'enemyDeathShooter') {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'square';
-        osc.frequency.value = 280;
-        gain.gain.value = 0.13;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.frequency.linearRampToValueAtTime(95, t + 0.4);
-        gain.gain.linearRampToValueAtTime(0.0001, t + 0.55);
-        osc.stop(t + 0.57);
-      }
-    } catch {
-      // Audio not available (silent fallback)
-    }
-  }, []);
+  const playSound = useCallback((type: string, options?: { volume?: number; pitch?: number }) => {
+    if (!soundEnabled) return;
+    soundManagerRef.current?.play(type, options);
+  }, [soundEnabled]);
 
   // ==================== SPAWN HELPERS ====================
   const spawnEnemy = (state: GameState) => {
@@ -1781,6 +2113,14 @@ export default function NeonSurgeGame() {
     lastTimeRef.current = 0;
     hudUpdateRef.current = 0;
 
+    // Reset per-run achievement trackers
+    runFusionsRef.current = 0;
+    runMaxLevelRef.current = 1;
+    runDamageTakenRef.current = 0;
+    runStartTimeRef.current = Date.now();
+    runEnemiesKilledRef.current = 0;
+    firstBloodUnlockedRef.current = false;
+
     // Restart loop if needed
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
     startAmbientHum();
@@ -1798,6 +2138,14 @@ export default function NeonSurgeGame() {
     // Reset timing refs
     lastTimeRef.current = 0;
     hudUpdateRef.current = 0;
+
+    // Reset per-run achievement trackers
+    runFusionsRef.current = 0;
+    runMaxLevelRef.current = 1;
+    runDamageTakenRef.current = 0;
+    runStartTimeRef.current = Date.now();
+    runEnemiesKilledRef.current = 0;
+    firstBloodUnlockedRef.current = false;
 
     setHud({
       score: 0,
@@ -1859,6 +2207,7 @@ export default function NeonSurgeGame() {
 
     setScreen('menu');
     setShowStageClear(false);
+    setPendingXurgeRewards(0n); // Clear any unclaimed on-chain utility token rewards
   }, [unlockedUpTo, hud.currentStage, neonShards]);
 
   // ==================== DIFFICULTY RAMP (15s enemy count + 30s spawn rate) ====================
@@ -2126,9 +2475,19 @@ export default function NeonSurgeGame() {
 
     // Advance level
     state.level += 1;
+    runMaxLevelRef.current = Math.max(runMaxLevelRef.current, state.level);
     state.xp -= state.xpToNextLevel;
     state.xpToNextLevel = Math.floor(10 + (state.level - 1) * 9);
     state.pendingLevelUp = false;
+
+    if (runMaxLevelRef.current >= 10) {
+      unlockAchievement('upgradeMaster');
+    }
+
+    lifetimeHighestLevelRef.current = Math.max(lifetimeHighestLevelRef.current, state.level);
+    incrementAchievementProgress('level20');
+    incrementAchievementProgress('level30');
+    saveLifetimeStats();
     state.isPaused = false;
     resumeStageTimer(state); // Resume the 3-minute stage timer
 
@@ -2157,9 +2516,19 @@ export default function NeonSurgeGame() {
     // Fusion is now offered directly as a level-up choice when conditions are met
 
     state.level += 1;
+    runMaxLevelRef.current = Math.max(runMaxLevelRef.current, state.level);
     state.xp -= state.xpToNextLevel;
     state.xpToNextLevel = Math.floor(10 + (state.level - 1) * 9);
     state.pendingLevelUp = false;
+
+    if (runMaxLevelRef.current >= 10) {
+      unlockAchievement('upgradeMaster');
+    }
+
+    lifetimeHighestLevelRef.current = Math.max(lifetimeHighestLevelRef.current, state.level);
+    incrementAchievementProgress('level20');
+    incrementAchievementProgress('level30');
+    saveLifetimeStats();
     state.isPaused = false;
     resumeStageTimer(state); // Resume the 3-minute stage timer
 
@@ -2236,6 +2605,17 @@ export default function NeonSurgeGame() {
     // Add to fusions list + mark the active as fused (for visuals + renamed shots)
     state.skills.fusions.push(fusionName);
     state.skills.fusedActives[activeKey] = fusionName;
+
+    runFusionsRef.current += 1;
+    lifetimeFusionsRef.current += 1;
+    if (runFusionsRef.current >= 5) {
+      unlockAchievement('fusionExpert');
+    }
+
+    incrementAchievementProgress('fusion10');
+    incrementAchievementProgress('fusion25');
+    saveLifetimeStats();
+    checkAndUnlockProgressAchievements();
 
     // Epic dedicated fusion VFX + feedback (purple/cyan rings + massive burst)
     playSound('stageClear');
@@ -2430,9 +2810,19 @@ export default function NeonSurgeGame() {
 
     // Advance level + prepare next threshold
     state.level += 1;
+    runMaxLevelRef.current = Math.max(runMaxLevelRef.current, state.level);
     state.xp -= state.xpToNextLevel;
     state.xpToNextLevel = Math.floor(10 + (state.level - 1) * 9);
     state.pendingLevelUp = false;
+
+    if (runMaxLevelRef.current >= 10) {
+      unlockAchievement('upgradeMaster');
+    }
+
+    lifetimeHighestLevelRef.current = Math.max(lifetimeHighestLevelRef.current, state.level);
+    incrementAchievementProgress('level20');
+    incrementAchievementProgress('level30');
+    saveLifetimeStats();
     state.isPaused = false;
     resumeStageTimer(state); // Resume the 3-minute stage timer
 
@@ -2512,7 +2902,13 @@ export default function NeonSurgeGame() {
 
   // ==================== AUTO ATTACK (with upgrades) ====================
   const tryAutoAttack = (state: GameState, currentTime: number) => {
-    const cooldown = getCurrentFireCooldown(state);
+    let cooldown = getCurrentFireCooldown(state);
+
+    // Mobile: Holding right fire zone gives a small fire rate boost
+    if (isSmallScreen && rightFireRef.current) {
+      cooldown *= 0.65;
+    }
+
     if (currentTime - state.lastShotTime < cooldown) return;
     if (state.enemies.length === 0) return;
 
@@ -2607,7 +3003,22 @@ export default function NeonSurgeGame() {
 
     state.score += 18;
     state.kills += 1;
+    runEnemiesKilledRef.current += 1;
+    lifetimeKillsRef.current += 1;
     playSound('hit');
+
+    if (!firstBloodUnlockedRef.current) {
+      unlockAchievement('firstBlood');
+      firstBloodUnlockedRef.current = true;
+    }
+
+    // Progress for kill achievements
+    incrementAchievementProgress('kill50');
+    incrementAchievementProgress('kill100');
+    incrementAchievementProgress('kill500');
+
+    saveLifetimeStats();
+    checkAndUnlockProgressAchievements();
 
     const now = Date.now();
     if (now - state.lastKillTime < 3000) {
@@ -2659,11 +3070,13 @@ export default function NeonSurgeGame() {
     // Big XP reward
     const xpReward = (isFinal ? 220 : 120) + state.currentStage * 45;
     state.xp += xpReward;
-    addFloatingText(state, b.x, b.y - 30, `+${xpReward} XP`, COLORS.cyan, 18);
+    addFloatingText(state, b.x, b.y - 30, `+${xpReward} XP`, COLORS.cyan, isPhonePortrait ? 14 : 18);
 
     if (isFinal) {
-      addFloatingText(state, b.x, b.y - 52, 'PROTOCOL COMPLETE', '#c026ff', 16);
+      addFloatingText(state, b.x, b.y - 52, 'PROTOCOL COMPLETE', '#c026ff', isPhonePortrait ? 12 : 16);
     }
+
+    unlockAchievement('bossSlayer');
 
     // Stage clear announcement
     playSound('stageClear');
@@ -2674,6 +3087,23 @@ export default function NeonSurgeGame() {
     const shardsEarned = (isFinal ? 55 : 25) + state.currentStage * 15;
     setStageClearRewards({ xp: reward, shards: shardsEarned });
     setShowStageClear(true);
+
+    // Achievement checks on stage clear
+    const stageTime = (Date.now() - runStartTimeRef.current) / 1000 / 60; // minutes
+    const noDamage = runDamageTakenRef.current === 0;
+
+    if (state.currentStage === 1) unlockAchievement('survivor');
+    if (state.currentStage === 5) unlockAchievement('stageMaster');
+    if (state.currentStage === 10) unlockAchievement('legendary');
+
+    lifetimeStagesClearedRef.current += 1;
+    incrementAchievementProgress('stages5');
+    incrementAchievementProgress('stages10');
+    saveLifetimeStats();
+    checkAndUnlockProgressAchievements();
+
+    if (stageTime < 2) unlockAchievement('speedDemon');
+    if (noDamage) unlockAchievement('untouchable');
 
     // Blockchain eligibility
     const finalScore = Math.floor(state.score);
@@ -2686,12 +3116,12 @@ export default function NeonSurgeGame() {
     const newShards = currentSaved + shardsEarned;
     saveNeonShards(newShards);
 
-    // ==================== NSH REWARD ====================
-    const nshReward = BigInt((isFinal ? 80 : 40) + state.currentStage * 12);
-    if (nshReward > 0n) {
-      setPendingNshRewards(prev => prev + nshReward);
+    // ==================== $XURGE REWARD (Utility Token - Play-to-Earn) ====================
+    const xurgeReward = BigInt((isFinal ? 80 : 40) + state.currentStage * 12);
+    if (xurgeReward > 0n) {
+      setPendingXurgeRewards(prev => prev + xurgeReward);
       // Show nice notification (will be picked up in UI)
-      addFloatingText(state, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60, `+${nshReward.toString()} NSH`, '#c026ff', 16);
+      addFloatingText(state, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60, `+${xurgeReward.toString()} $XURGE`, '#c026ff', isPhonePortrait ? 12 : 16);
     }
 
     state.boss = null;
@@ -2773,6 +3203,7 @@ export default function NeonSurgeGame() {
         dmg = Math.max(1, Math.floor(dmg * finalDR));
 
         state.player.health -= dmg;
+        runDamageTakenRef.current += dmg;
         state.player.hitFlashUntil = nowMs + 220;
         state.player.invulnerableUntil = nowSec + PLAYER_INVULN_DURATION;
         addScreenShake(state, 9);
@@ -2827,6 +3258,13 @@ export default function NeonSurgeGame() {
         createOrbCollectEffect(state, orb.x, orb.y);
         addFloatingText(state, orb.x, orb.y - 8, `+${xpValue} XP`, COLORS.blue, 12);
 
+        lifetimeXpRef.current += 1;
+        incrementAchievementProgress('xp100');
+        incrementAchievementProgress('xp500');
+        incrementAchievementProgress('xp1000');
+        saveLifetimeStats();
+        checkAndUnlockProgressAchievements();
+
         // Check for level up (PAUSE GAME + show UI immediately)
         if (state.xp >= state.xpToNextLevel && !state.pendingLevelUp) {
           state.pendingLevelUp = true;
@@ -2848,7 +3286,7 @@ export default function NeonSurgeGame() {
     state.isPaused = false;
     state.screenShake = 14;
     stopAmbientHum();
-    playSound('death');
+    playSound('gameOver', { volume: 1.1 });
 
     // Final HUD update
     const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
@@ -2878,20 +3316,33 @@ export default function NeonSurgeGame() {
     const wasMoving = keysRef.current.size > 0;
     state.player.update(keysRef.current, dt, currentSpeed);
 
-    // Basic touch movement support (move toward tap location if no keyboard input)
-    if (touchTargetRef.current && keysRef.current.size === 0) {
+    // Mobile Touch Controls Priority
+    const joy = joystickDirRef.current;
+    const usingJoystick = isSmallScreen && joystickRef.current.active && (Math.abs(joy.x) > 0.1 || Math.abs(joy.y) > 0.1);
+
+    if (usingJoystick && keysRef.current.size === 0) {
+      // Virtual joystick movement (smooth)
+      state.player.x += joy.x * currentSpeed * dt;
+      state.player.y += joy.y * currentSpeed * dt;
+
+      // Clamp to bounds
+      const pad = state.player.radius + 4;
+      state.player.x = Math.max(pad, Math.min(CANVAS_WIDTH - pad, state.player.x));
+      state.player.y = Math.max(pad, Math.min(CANVAS_HEIGHT - pad, state.player.y));
+    } 
+    else if (touchTargetRef.current && keysRef.current.size === 0) {
+      // Fallback basic touch movement (tap to move)
       const target = touchTargetRef.current;
       const dx = target.x - state.player.x;
       const dy = target.y - state.player.y;
       const dist = Math.hypot(dx, dy);
 
-      if (dist > 8) { // deadzone
+      if (dist > 8) {
         const moveX = dx / dist;
         const moveY = dy / dist;
         state.player.x += moveX * currentSpeed * dt;
         state.player.y += moveY * currentSpeed * dt;
 
-        // Clamp
         const pad = state.player.radius + 4;
         state.player.x = Math.max(pad, Math.min(CANVAS_WIDTH - pad, state.player.x));
         state.player.y = Math.max(pad, Math.min(CANVAS_HEIGHT - pad, state.player.y));
@@ -2944,9 +3395,11 @@ export default function NeonSurgeGame() {
       state.bossActive = true;
       state.boss = new Boss(state.currentStage, CANVAS_WIDTH / 2, 80);
 
+      playSound('bossAppear', { volume: 1.1 });
+
       // Warning effect
       addScreenShake(state, 12);
-      addFloatingText(state, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40, "BOSS INCOMING!", '#ff2a6d', 32);
+      addFloatingText(state, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40, "BOSS INCOMING!", '#ff2a6d', isPhonePortrait ? 24 : 32);
 
       // Clear some normal enemies for drama
       state.enemies = state.enemies.slice(0, Math.floor(state.enemies.length * 0.3));
@@ -3850,7 +4303,8 @@ export default function NeonSurgeGame() {
       const alpha = Math.max(0.1, ft.life / 0.85);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = ft.color;
-      ctx.font = `bold ${ft.size}px var(--font-geist-mono)`;
+      const scaledSize = Math.round(ft.size * uiScaleRef.current);
+      ctx.font = `bold ${scaledSize}px var(--font-geist-mono)`;
       ctx.fillText(ft.text, ft.x, ft.y);
     }
     ctx.globalAlpha = 1;
@@ -4398,6 +4852,22 @@ export default function NeonSurgeGame() {
   // Basic Touch Support for mobile (tap to move toward point)
   const touchTargetRef = useRef<{ x: number; y: number } | null>(null);
 
+  // ==================== ADVANCED MOBILE TOUCH CONTROLS ====================
+  // Virtual Joystick state
+  const joystickRef = useRef<{
+    active: boolean;
+    baseX: number;
+    baseY: number;
+    knobX: number;
+    knobY: number;
+  }>({ active: false, baseX: 0, baseY: 0, knobX: 0, knobY: 0 });
+
+  // Right side firing (tap/hold to shoot)
+  const rightFireRef = useRef<boolean>(false);
+
+  // Joystick output direction (normalized -1 to 1)
+  const joystickDirRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const handleTouchInput = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !gameRef.current) return;
@@ -4418,6 +4888,100 @@ export default function NeonSurgeGame() {
     // Prevent scrolling on touch
     e.preventDefault();
   }, []);
+
+  // ==================== VIRTUAL JOYSTICK HANDLERS ====================
+  const JOYSTICK_SIZE = 110;
+  const JOYSTICK_KNOB_SIZE = 40;
+  const JOYSTICK_DEADZONE = 0.18;
+
+  const handleJoystickStart = (clientX: number, clientY: number) => {
+    const joystickEl = document.getElementById('virtual-joystick');
+    if (!joystickEl) return;
+
+    const rect = joystickEl.getBoundingClientRect();
+    const baseX = rect.left + rect.width / 2;
+    const baseY = rect.top + rect.height / 2;
+
+    joystickRef.current = {
+      active: true,
+      baseX,
+      baseY,
+      knobX: clientX,
+      knobY: clientY,
+    };
+
+    updateJoystickDirection(clientX, clientY);
+  };
+
+  const handleJoystickMove = (clientX: number, clientY: number) => {
+    if (!joystickRef.current.active) return;
+    updateJoystickDirection(clientX, clientY);
+  };
+
+  const updateJoystickDirection = (clientX: number, clientY: number) => {
+    const j = joystickRef.current;
+    const dx = clientX - j.baseX;
+    const dy = clientY - j.baseY;
+    const dist = Math.hypot(dx, dy);
+    const maxDist = JOYSTICK_SIZE / 2 - 10;
+
+    let finalX = clientX;
+    let finalY = clientY;
+
+    if (dist > maxDist) {
+      const scale = maxDist / dist;
+      finalX = j.baseX + dx * scale;
+      finalY = j.baseY + dy * scale;
+    }
+
+    j.knobX = finalX;
+    j.knobY = finalY;
+
+    // Normalize direction
+    const normDist = Math.min(dist, maxDist);
+    const nx = normDist > 5 ? (dx / normDist) : 0;
+    const ny = normDist > 5 ? (dy / normDist) : 0;
+
+    // Apply deadzone
+    const len = Math.hypot(nx, ny);
+    if (len < JOYSTICK_DEADZONE) {
+      joystickDirRef.current = { x: 0, y: 0 };
+    } else {
+      const scale = (len - JOYSTICK_DEADZONE) / (1 - JOYSTICK_DEADZONE);
+      joystickDirRef.current = {
+        x: nx * Math.min(scale, 1),
+        y: ny * Math.min(scale, 1),
+      };
+    }
+
+    // Force re-render of joystick knob position (we'll use state or direct DOM for smoothness)
+    const knob = document.getElementById('joystick-knob');
+    if (knob) {
+      knob.style.left = `${finalX - j.baseX + JOYSTICK_SIZE/2 - JOYSTICK_KNOB_SIZE/2}px`;
+      knob.style.top = `${finalY - j.baseY + JOYSTICK_SIZE/2 - JOYSTICK_KNOB_SIZE/2}px`;
+    }
+  };
+
+  const handleJoystickEnd = () => {
+    joystickRef.current.active = false;
+    joystickDirRef.current = { x: 0, y: 0 };
+
+    const knob = document.getElementById('joystick-knob');
+    if (knob) {
+      knob.style.left = `${JOYSTICK_SIZE/2 - JOYSTICK_KNOB_SIZE/2}px`;
+      knob.style.top = `${JOYSTICK_SIZE/2 - JOYSTICK_KNOB_SIZE/2}px`;
+    }
+  };
+
+  // Right side fire area handlers
+  const handleRightFireStart = (e: React.TouchEvent | React.PointerEvent) => {
+    rightFireRef.current = true;
+    e.preventDefault();
+  };
+
+  const handleRightFireEnd = () => {
+    rightFireRef.current = false;
+  };
 
   // Toggle Skill Panel (used by Tab and Pause button)
   const toggleSkillPanel = useCallback(() => {
@@ -4458,14 +5022,26 @@ export default function NeonSurgeGame() {
     };
   }, [handleKeyDown, handleKeyUp]);
 
-  // Mobile / small screen detection for responsive UI and warning
+  // Mobile / small screen + portrait detection (optimized for iPhone/Android portrait)
   useEffect(() => {
     const checkScreenSize = () => {
-      setIsSmallScreen(window.innerWidth < 768); // tablet and below
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const small = width < 768;
+      const portrait = height > width * 1.1;
+      setIsSmallScreen(small);
+      setIsPortrait(portrait);
+
+      // Smaller fonts in phone portrait to make gameplay feel bigger and less cluttered
+      uiScaleRef.current = (small && portrait) ? 0.72 : (small ? 0.85 : 1);
     };
     checkScreenSize();
     window.addEventListener('resize', checkScreenSize);
-    return () => window.removeEventListener('resize', checkScreenSize);
+    window.addEventListener('orientationchange', checkScreenSize);
+    return () => {
+      window.removeEventListener('resize', checkScreenSize);
+      window.removeEventListener('orientationchange', checkScreenSize);
+    };
   }, []);
 
   // Format timer MM:SS
@@ -4518,6 +5094,52 @@ export default function NeonSurgeGame() {
 
       // Load personal NFT collection (local + on-chain mints remembered)
       loadMyNFTs();
+
+      // Load Achievements
+      const savedAchievements = localStorage.getItem('neonSurgeAchievements');
+      if (savedAchievements) {
+        try {
+          const parsed = JSON.parse(savedAchievements);
+          if (Array.isArray(parsed)) {
+            setUnlockedAchievements(parsed);
+          }
+        } catch {}
+      }
+
+      const savedProgress = localStorage.getItem('neonSurgeAchievementProgress');
+      if (savedProgress) {
+        try {
+          const parsed = JSON.parse(savedProgress);
+          if (typeof parsed === 'object') {
+            setAchievementProgress(parsed);
+          }
+        } catch {}
+      }
+
+      // Load lifetime counters
+      const savedLifetime = localStorage.getItem('neonSurgeLifetimeStats');
+      if (savedLifetime) {
+        try {
+          const parsed = JSON.parse(savedLifetime);
+          lifetimeKillsRef.current = parsed.kills || 0;
+          lifetimeFusionsRef.current = parsed.fusions || 0;
+          lifetimeXpRef.current = parsed.xp || 0;
+          lifetimeStagesClearedRef.current = parsed.stages || 0;
+          lifetimeHighestLevelRef.current = parsed.highestLevel || 1;
+        } catch {}
+      }
+
+      // Load Daily Reward data
+      const savedDaily = localStorage.getItem('neonSurgeDailyReward');
+      if (savedDaily) {
+        try {
+          const parsed = JSON.parse(savedDaily);
+          setDailyRewardData({
+            lastClaimDate: parsed.lastClaimDate || '',
+            streak: parsed.streak || 0,
+          });
+        } catch {}
+      }
     }
   }, []);
 
@@ -4531,8 +5153,13 @@ export default function NeonSurgeGame() {
   useEffect(() => {
     if (showNFT) {
       refreshMyNFTsFromChain(); // lightweight enrichment of already-known tokenIds
+
+      // Check Collector achievement
+      if (myNFTs.length >= 5) {
+        unlockAchievement('collector');
+      }
     }
-  }, [showNFT, refreshMyNFTsFromChain]);
+  }, [showNFT, refreshMyNFTsFromChain, myNFTs.length]);
 
   // Keep screenRef always up to date (for use inside RAF callbacks)
   useEffect(() => {
@@ -4703,30 +5330,41 @@ export default function NeonSurgeGame() {
                     </button>
                   </div>
 
-                  {/* Beautiful NSH Balance Pill */}
-                  <div className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-[#1a0f22] border border-[#c026ff]/50 shadow-[0_0_12px_rgba(192,38,255,0.25)]">
-                    <span className="text-[#c026ff] text-lg">✦</span>
-                    <div>
-                      <div className="font-display text-lg leading-none text-[#c026ff]">
-                        {isLoadingNshBalance ? '...' : (Number(nshBalance) / 1e18).toFixed(0)}
+                  {/* $XURGE Balance Pill (Utility Token) + Info Button */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-[#1a0f22] border border-[#c026ff]/50 shadow-[0_0_12px_rgba(192,38,255,0.25)]">
+                      <span className="text-[#c026ff] text-lg">✦</span>
+                      <div>
+                        <div className="font-display text-lg leading-none text-[#c026ff]">
+                          {isLoadingXurgeBalance ? '...' : (Number(xurgeBalance) / 1e18).toFixed(0)}
+                        </div>
+                        <div className="text-[9px] text-[#c026ff]/70 tracking-[2px] -mt-0.5">$XURGE</div>
                       </div>
-                      <div className="text-[9px] text-[#c026ff]/70 tracking-[2px] -mt-0.5">NSH</div>
                     </div>
+
+                    {/* Token Info Button */}
+                    <button
+                      onClick={() => setShowTokenInfo(true)}
+                      className="w-8 h-8 flex items-center justify-center rounded-full border border-[#c026ff]/60 text-[#c026ff] hover:bg-[#c026ff] hover:text-black text-sm font-bold transition-all"
+                      title="Token Info"
+                    >
+                      ?
+                    </button>
                   </div>
                 </div>
-                <div className="text-[10px] text-[#6b7280] tracking-[1px]">SEPOLIA TESTNET • ON-CHAIN FEATURES ENABLED</div>
+                <div className="text-[10px] text-[#6b7280] tracking-[1px]">SEPOLIA • $XURGE (Utility) + $NXG (Governance coming soon)</div>
               </div>
             )}
 
             {!isConnected && (
-              <div className="text-[10px] text-[#6b7280] mt-2 tracking-[1px]">Guest Mode: Full gameplay enabled • Connect to unlock on-chain features</div>
+              <div className="text-[10px] text-[#6b7280] mt-2 tracking-[1px]">Guest Mode: Full gameplay enabled • Connect wallet for $XURGE utility & future $NXG governance</div>
             )}
 
-            {/* Mobile Warning Banner - Best experienced on Desktop */}
+            {/* Mobile Warning Banner */}
             {isSmallScreen && (
               <div className="mt-4 mx-auto max-w-[420px] bg-[#1a1a22] border border-[#ff2a6d]/70 rounded-xl p-4 text-sm text-[#ff2a6d] text-center">
-                <strong>NeonXurge is best experienced on desktop.</strong><br />
-                You can still play on mobile, but controls are optimized for keyboard.
+                <strong>Best on desktop or landscape.</strong><br />
+                Mobile has virtual joystick + tap-to-fire. Rotate your device for a better experience.
               </div>
             )}
           </div>
@@ -4799,14 +5437,14 @@ export default function NeonSurgeGame() {
           {/* Action Buttons */}
           <div className="flex flex-col items-center gap-4">
             <button
-              onClick={startSelectedStage}
+              onClick={() => { playSound('buttonClick'); startSelectedStage(); }}
               className="neon-button text-xl sm:text-2xl px-10 sm:px-16 py-4 sm:py-5 font-display tracking-[3px] sm:tracking-[4px] rounded w-full max-w-[320px]"
             >
               START GAME
             </button>
 
             <button
-              onClick={() => setShowEquipment(true)}
+              onClick={() => { playSound('buttonClick'); setShowEquipment(true); }}
               className="w-full max-w-[320px] mx-auto px-8 sm:px-12 py-2.5 sm:py-3 rounded-xl border-2 border-[#c026ff] text-[#c026ff] hover:bg-[#c026ff] hover:text-black transition-all font-display tracking-[2px] sm:tracking-[3px] text-base sm:text-lg"
             >
               EQUIPMENT
@@ -4815,18 +5453,38 @@ export default function NeonSurgeGame() {
             {/* Blockchain Features */}
             <div className="flex gap-4">
               <button
-                onClick={() => { setShowLeaderboard(true); fetchOnChainLeaderboard(); }}
+                onClick={() => { playSound('buttonClick'); setShowLeaderboard(true); fetchOnChainLeaderboard(); }}
                 className="px-4 sm:px-10 py-2.5 rounded-xl border-2 border-[#00f9ff] text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black transition-all font-display tracking-[3px] text-sm sm:text-base"
               >
                 LEADERBOARD
               </button>
               <button
-                onClick={() => setShowNFT(true)}
+                onClick={() => { playSound('buttonClick'); setShowNFT(true); }}
                 className="px-4 sm:px-10 py-2.5 rounded-xl border-2 border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black transition-all font-display tracking-[3px] text-sm sm:text-base"
               >
                 NFT COLLECTION
               </button>
             </div>
+
+            {/* Achievements Button */}
+            <button
+              onClick={() => { playSound('buttonClick'); setShowAchievements(true); }}
+              className="mt-3 w-full max-w-[320px] mx-auto px-8 sm:px-12 py-2.5 sm:py-3 rounded-xl border-2 border-[#ffd700] text-[#ffd700] hover:bg-[#ffd700] hover:text-black transition-all font-display tracking-[2px] sm:tracking-[3px] text-base sm:text-lg"
+            >
+              ACHIEVEMENTS ({unlockedAchievements.length}/{ACHIEVEMENTS.length})
+            </button>
+
+            {/* Daily Reward Button */}
+            <button
+              onClick={() => { playSound('buttonClick'); setShowDailyReward(true); }}
+              className="mt-2 w-full max-w-[320px] mx-auto px-8 sm:px-12 py-2.5 sm:py-3 rounded-xl border-2 border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black transition-all font-display tracking-[2px] sm:tracking-[3px] text-base sm:text-lg relative"
+            >
+              DAILY REWARD
+              {isDailyRewardAvailable() && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#ff2a6d] rounded-full border-2 border-black" />
+              )}
+              <div className="text-[10px] tracking-widest mt-0.5">Day {getCurrentStreakDay()}/7 Streak</div>
+            </button>
 
             <div className="flex gap-4 sm:gap-6 mt-2">
               <button 
@@ -4840,6 +5498,7 @@ export default function NeonSurgeGame() {
                 onClick={() => {
                   const newSound = !soundEnabled;
                   setSoundEnabled(newSound);
+                  soundManagerRef.current?.setEnabled(newSound);
                   if (!newSound) stopAmbientHum();
                 }}
                 className="text-sm text-[#9ca3af] hover:text-white tracking-wider"
@@ -5043,6 +5702,291 @@ export default function NeonSurgeGame() {
           </div>
         )}
 
+        {/* ==================== ACHIEVEMENTS SCREEN ==================== */}
+        {showAchievements && (
+          <div className="fixed inset-0 z-[92] flex items-center justify-center bg-black/95 backdrop-blur-md p-4" onClick={() => setShowAchievements(false)}>
+            <div className="w-full max-w-[860px] hud-panel p-6 rounded-2xl border border-[#ffd700]/40 max-h-[92vh] overflow-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <div className="font-display text-4xl tracking-[-1px] text-[#ffd700]">ACHIEVEMENTS</div>
+                  <div className="text-sm text-[#6b7280] tracking-[2px] mt-1">{unlockedAchievements.length} / {ACHIEVEMENTS.length} UNLOCKED</div>
+                </div>
+                <button onClick={() => setShowAchievements(false)} className="text-3xl text-[#6b7280] hover:text-white">×</button>
+              </div>
+
+              <div className="space-y-3">
+                {ACHIEVEMENTS.map((ach) => {
+                  const unlocked = unlockedAchievements.includes(ach.id);
+                  const progress = ach.target ? (achievementProgress[ach.id] || 0) : 0;
+                  const progressPercent = ach.target ? Math.min(100, Math.floor((progress / ach.target) * 100)) : 0;
+
+                  return (
+                    <div key={ach.id} className={`p-4 rounded-xl border ${unlocked ? 'border-[#ffd700]/60 bg-[#1a1a22]' : 'border-[#2a2a35] bg-[#0a0a0f]'} flex flex-col gap-2`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`text-4xl ${unlocked ? 'opacity-100' : 'opacity-30'}`}>🏆</div>
+                        <div className="flex-1">
+                          <div className={`font-display text-xl ${unlocked ? 'text-[#ffd700]' : 'text-[#6b7280]'}`}>{ach.name}</div>
+                          <div className="text-sm text-[#a1a1aa]">{ach.desc}</div>
+                        </div>
+                        <div className={`text-right ${unlocked ? 'text-[#ffd700]' : 'text-[#6b7280]'}`}>
+                          {unlocked ? (
+                            <div className="text-sm font-bold">UNLOCKED</div>
+                          ) : ach.target ? (
+                            <div className="text-xs">{progress} / {ach.target}</div>
+                          ) : (
+                            <div className="text-xs">+{ach.reward} NS</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress bar for multi-step achievements */}
+                      {ach.target && !unlocked && (
+                        <div className="w-full bg-[#2a2a35] h-2 rounded overflow-hidden">
+                          <div 
+                            className="bg-[#ffd700] h-2 transition-all duration-300" 
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== DAILY REWARD MODAL ==================== */}
+        {showDailyReward && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md" onClick={() => { setShowDailyReward(false); setClaimedReward(null); }}>
+            <div className="hud-panel max-w-md w-full p-8 rounded-3xl border-2 border-[#ff2a6d] text-center" onClick={e => e.stopPropagation()}>
+              {claimedReward ? (
+                /* SUCCESS / CLAIMED VIEW */
+                <>
+                  <div className="text-6xl mb-4">🎁</div>
+                  <div className="font-display text-4xl tracking-[-1px] text-[#ff2a6d] mb-2">DAILY REWARD CLAIMED!</div>
+                  <div className="text-2xl mb-1">Day {claimedReward.day} Streak</div>
+
+                  {/* 7-Day Streak Visual - Calendar Circles */}
+                  <div className="flex justify-center gap-2 my-4">
+                    {[1,2,3,4,5,6,7].map((d) => (
+                      <div
+                        key={d}
+                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all ${
+                          d <= claimedReward.day 
+                            ? 'bg-[#ff2a6d] border-[#ff2a6d] text-black scale-110 shadow-[0_0_8px_#ff2a6d]' 
+                            : 'border-[#6b7280] text-[#6b7280]'
+                        }`}
+                      >
+                        {d}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="text-5xl font-display text-[#c026ff] my-6">+{claimedReward.nsh} NS</div>
+                  
+                  {claimedReward.gotNFT && (
+                    <div className="mb-6 p-4 bg-[#1a0f22] border border-[#c026ff] rounded-xl">
+                      <div className="text-3xl mb-1">✦ RARE NFT ACQUIRED! ✦</div>
+                      <div className="text-sm text-[#c026ff]">A Rare Survivor Badge has been added to your collection!</div>
+                    </div>
+                  )}
+                  
+                  <button 
+                    onClick={() => { setShowDailyReward(false); setClaimedReward(null); }}
+                    className="w-full neon-button py-3 text-lg tracking-widest"
+                  >
+                    AWESOME!
+                  </button>
+                </>
+              ) : (
+                /* DAILY REWARD HUB / VIEW - streak calendar + claim */
+                <>
+                  <div className="text-6xl mb-3">🎁</div>
+                  <div className="font-display text-3xl tracking-[-1px] text-[#ff2a6d] mb-1">DAILY REWARD</div>
+                  <div className="text-xs text-[#6b7280] tracking-[2px] mb-5">7-DAY STREAK • RESETS AT UTC MIDNIGHT</div>
+
+                  {(() => {
+                    const streak = dailyRewardData.streak || 0;
+                    const available = isDailyRewardAvailable();
+                    const nextDay = streak < 7 ? streak + 1 : 7;
+                    const rewardAmount = available ? DAILY_REWARDS[nextDay - 1] : (streak > 0 ? DAILY_REWARDS[streak - 1] : 50);
+                    const displayStreak = Math.min(Math.max(streak, 1), 7);
+
+                    return (
+                      <>
+                        <div className="mb-2">
+                          <div className="text-sm text-[#9ca3af]">CURRENT STREAK</div>
+                          <div className="text-2xl font-display text-white">DAY <span className="text-[#ff2a6d]">{displayStreak}</span> / 7</div>
+                        </div>
+
+                        {/* 7-Day Reward Calendar - shows NS (Neon Shards) for every day */}
+                        <div className="my-3">
+                          <div className="grid grid-cols-7 gap-1">
+                            {[1,2,3,4,5,6,7].map((d) => {
+                              const reward = DAILY_REWARDS[d - 1];
+                              const isFilled = d <= streak;
+                              const isNext = available && d === (streak + 1);
+                              const isDay7 = d === 7;
+                              return (
+                                <div key={d} className="flex flex-col items-center">
+                                  <div
+                                    className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${
+                                      isFilled 
+                                        ? 'bg-[#ff2a6d] border-[#ff2a6d] text-black scale-105 shadow-[0_0_10px_#ff2a6d]' 
+                                        : isNext
+                                        ? 'border-[#ff2a6d] text-[#ff2a6d] bg-[#ff2a6d]/10 scale-110 shadow-[0_0_12px_#ff2a6d] animate-pulse'
+                                        : isDay7
+                                        ? 'border-[#c026ff] text-[#c026ff] bg-[#c026ff]/5'
+                                        : 'border-[#6b7280] text-[#6b7280]'
+                                    }`}
+                                  >
+                                    {d}
+                                  </div>
+                                  <div className={`text-[9px] font-mono tracking-tighter mt-0.5 text-center ${
+                                    isFilled ? 'text-[#ff2a6d] font-semibold' : isNext ? 'text-[#ff2a6d] font-bold' : isDay7 ? 'text-[#c026ff]' : 'text-[#6b7280]'
+                                  }`}>
+                                    {reward}
+                                    {isDay7 && (
+                                      <div className="text-[7px] leading-none text-[#c026ff] font-bold tracking-[0.5px] mt-px">★25% NFT</div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="text-[9px] text-[#6b7280] tracking-[1px] mt-1">NS PER DAY  •  DAY 7 = 25% RARE NFT</div>
+                        </div>
+
+                        {available ? (
+                          <>
+                            <div className="text-xs tracking-widest text-[#6b7280] mb-1 mt-1">TODAY'S REWARD</div>
+                            <div className="text-6xl font-display text-[#c026ff] mb-1">+{rewardAmount}</div>
+                            <div className="text-sm text-[#c026ff] mb-4 tracking-wider">NEON SHARDS</div>
+
+                            {nextDay === 7 && (
+                              <div className="mb-4 text-xs px-3 py-1 bg-[#1a0f22] border border-[#c026ff]/50 rounded-full inline-block text-[#c026ff]">
+                                ★ DAY 7: 25% CHANCE FOR RARE NFT ★
+                              </div>
+                            )}
+
+                            <button 
+                              onClick={() => { claimDailyReward(); }}
+                              className="w-full neon-button py-3.5 text-lg tracking-widest mb-3"
+                            >
+                              CLAIM DAY {nextDay} REWARD
+                            </button>
+                            <button 
+                              onClick={() => { setShowDailyReward(false); setClaimedReward(null); }}
+                              className="text-sm text-[#6b7280] hover:text-white tracking-wider"
+                            >
+                              MAYBE LATER
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="inline-block px-4 py-1 rounded-full bg-[#22c55e]/20 border border-[#22c55e]/60 text-[#22c55e] text-sm tracking-widest mb-4">CLAIMED FOR TODAY</div>
+                            <div className="text-[#d1d5db] mb-6 text-sm leading-relaxed">
+                              Great job keeping your streak!<br />Come back tomorrow for Day {Math.min(streak + 1, 7)} reward.
+                            </div>
+                            <button 
+                              onClick={() => { setShowDailyReward(false); setClaimedReward(null); }}
+                              className="w-full neon-button py-3 text-lg tracking-widest"
+                            >
+                              CLOSE
+                            </button>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TOKEN INFO MODAL ==================== */}
+        {showTokenInfo && (
+          <div
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-md p-4"
+            onClick={() => setShowTokenInfo(false)}
+          >
+            <div
+              className="hud-panel w-full max-w-[520px] rounded-3xl border-2 border-[#c026ff]/60 p-6 sm:p-8 text-left"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <div className="font-display text-3xl tracking-[-1px] text-[#c026ff]">TOKEN SYSTEM</div>
+                  <div className="text-xs tracking-[2px] text-[#6b7280] mt-1">NEONXURGE ECONOMY</div>
+                </div>
+                <button
+                  onClick={() => setShowTokenInfo(false)}
+                  className="text-2xl text-[#6b7280] hover:text-white transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-5 text-sm leading-relaxed text-[#d1d5db]">
+                {/* NS - Soft Currency */}
+                <div className="flex gap-4 p-4 rounded-2xl bg-[#111117] border border-[#6b7280]/40">
+                  <div className="text-3xl mt-0.5">◆</div>
+                  <div className="flex-1">
+                    <div className="font-semibold text-[#ff2a6d] tracking-wide">NS — Neon Shards</div>
+                    <div className="mt-1 text-[#a1a1aa]">
+                      Your main soft currency earned by playing the game. 
+                      Use Neon Shards (NS) to upgrade your Equipment and improve your chances of survival.
+                    </div>
+                    <div className="text-[11px] text-[#6b7280] mt-2 tracking-wider">EARNED FROM STAGES • ACHIEVEMENTS • DAILY REWARDS</div>
+                  </div>
+                </div>
+
+                {/* $XURGE - Utility Token */}
+                <div className="flex gap-4 p-4 rounded-2xl bg-[#111117] border border-[#c026ff]/50">
+                  <div className="text-3xl mt-0.5">✦</div>
+                  <div className="flex-1">
+                    <div className="font-semibold text-[#c026ff] tracking-wide">$XURGE — Xurge</div>
+                    <div className="mt-1 text-[#a1a1aa]">
+                      The real on-chain utility token. Use $XURGE to purchase premium Equipment upgrades 
+                      and earn it as Play-to-Earn rewards from strong runs.
+                    </div>
+                    <div className="text-[11px] text-[#6b7280] mt-2 tracking-wider">ON-CHAIN • USED FOR UPGRADES • PLAY-TO-EARN REWARDS</div>
+                  </div>
+                </div>
+
+                {/* $NXG - Governance Token */}
+                <div className="flex gap-4 p-4 rounded-2xl bg-[#111117] border border-[#ffd700]/40">
+                  <div className="text-3xl mt-0.5">★</div>
+                  <div className="flex-1">
+                    <div className="font-semibold text-[#ffd700] tracking-wide">$NXG — NeonXurge</div>
+                    <div className="mt-1 text-[#a1a1aa]">
+                      The governance token for the future of NeonXurge. 
+                      Holders will be able to stake, vote on game decisions, and earn additional rewards.
+                    </div>
+                    <div className="text-[11px] text-[#ffd700] mt-2 tracking-wider">COMING SOON — STAKING &amp; GOVERNANCE</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Note */}
+              <div className="mt-6 pt-4 border-t border-[#2a2a35] text-xs text-center text-[#6b7280]">
+                $NXG features are currently in development and will be added in a future update.
+                All on-chain tokens live on <span className="text-[#00f9ff]">Sepolia Testnet</span>.
+              </div>
+
+              <button
+                onClick={() => setShowTokenInfo(false)}
+                className="mt-6 w-full neon-button py-3 text-sm tracking-[2px]"
+              >
+                GOT IT
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ==================== EQUIPMENT SCREEN ==================== */}
         {showEquipment && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/95 backdrop-blur-md p-4">
@@ -5057,7 +6001,7 @@ export default function NeonSurgeGame() {
                     </div>
                     {isConnected && (
                       <div className="text-[#c026ff] font-mono text-sm sm:text-lg">
-                        {isLoadingNshBalance ? '...' : (Number(nshBalance) / 1e18).toFixed(0)} <span className="text-[10px] sm:text-xs tracking-widest">NSH</span>
+                        {isLoadingXurgeBalance ? '...' : (Number(xurgeBalance) / 1e18).toFixed(0)} <span className="text-[10px] sm:text-xs tracking-widest">$XURGE</span>
                       </div>
                     )}
                   </div>
@@ -5078,11 +6022,11 @@ export default function NeonSurgeGame() {
                   const cost = getUpgradeCost(level);
                   const stats = getEquipmentStats(key as keyof typeof equipmentLevels);
 
-                  // NSH payment support (when wallet connected)
-                  const nshCost = BigInt(cost) * 10n ** 18n;
-                  const hasEnoughNsh = isConnected && nshBalance >= nshCost;
+                  // $XURGE payment support (Utility token - when wallet connected)
+                  const xurgeCost = BigInt(cost) * 10n ** 18n;
+                  const hasEnoughXurge = isConnected && xurgeBalance >= xurgeCost;
                   const canUpgradeWithShards = neonShards >= cost;
-                  const canUpgrade = level < 10 && (canUpgradeWithShards || hasEnoughNsh);
+                  const canUpgrade = level < 10 && (canUpgradeWithShards || hasEnoughXurge);
 
                   return (
                     <div key={key} className="hud-panel p-3 sm:p-4 rounded-xl border border-[#2a2a35] hover:border-[#c026ff]/50 transition-all flex flex-col">
@@ -5109,46 +6053,46 @@ export default function NeonSurgeGame() {
                             const newLevels = { ...equipmentLevels };
                             (newLevels as any)[key] = level + 1;
 
-                            if (isConnected && hasEnoughNsh && walletClient && address) {
-                              // Pay with on-chain NSH (real tx)
-                              setIsNshTxPending(true);
+                            if (isConnected && hasEnoughXurge && walletClient && address) {
+                              // Pay with on-chain $XURGE (real utility token tx)
+                              setIsXurgeTxPending(true);
                               try {
                                 const sink = '0x000000000000000000000000000000000000dEaD'; // demo burn/sink address
                                 const hash = await walletClient.writeContract({
-                                  address: NSH_ADDRESS,
+                                  address: XURGE_ADDRESS,
                                   abi: ERC20_ABI,
                                   functionName: 'transfer',
-                                  args: [sink, nshCost],
+                                  args: [sink, xurgeCost],
                                   chain: sepolia,
                                   account: address!,
                                 });
-                                setLastNshTxHash(hash);
+                                setLastXurgeTxHash(hash);
                                 // Wait for confirmation (optional for UX)
                                 await publicClient?.waitForTransactionReceipt({ hash });
                                 saveEquipment(newLevels);
                                 // Refresh on-chain balance
-                                await refreshNshBalance();
+                                await refreshXurgeBalance();
                               } catch (err: any) {
-                                alert('NSH payment failed: ' + (err?.shortMessage || err?.message || 'User rejected'));
+                                alert('$XURGE payment failed: ' + (err?.shortMessage || err?.message || 'User rejected'));
                               } finally {
-                                setIsNshTxPending(false);
+                                setIsXurgeTxPending(false);
                               }
                             } else {
-                              // Pay with old Neon Shards
+                              // Pay with Neon Shards (soft currency)
                               saveEquipment(newLevels);
                               saveNeonShards(neonShards - cost);
                             }
                           }}
-                          disabled={!canUpgrade || isNshTxPending}
+                          disabled={!canUpgrade || isXurgeTxPending}
                           className={`w-full py-2 rounded-lg text-xs tracking-[1.5px] font-medium transition-all ${
-                            canUpgrade && !isNshTxPending
+                            canUpgrade && !isXurgeTxPending
                               ? 'bg-[#c026ff] text-black hover:bg-white' 
                               : 'bg-[#1f1f28] text-[#555] cursor-not-allowed'
                           }`}
                         >
-                          {isNshTxPending 
-                            ? 'PROCESSING NSH TX...' 
-                            : (hasEnoughNsh ? `UPGRADE FOR ${cost} NSH` : `UPGRADE • ${cost}`)}
+                          {isXurgeTxPending 
+                            ? 'PROCESSING $XURGE TX...' 
+                            : (hasEnoughXurge ? `UPGRADE FOR ${cost} $XURGE` : `UPGRADE • ${cost}`)}
                         </button>
                       ) : (
                         <div className="w-full py-2 rounded-lg text-xs tracking-[1.5px] font-medium bg-[#1f1f28] text-[#c026ff] text-center">
@@ -5168,133 +6112,222 @@ export default function NeonSurgeGame() {
 
   // ==================== GAME SCREEN ====================
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col items-center py-8 px-4 select-none">
-      {/* Header */}
-      <div className="w-full max-w-[860px] mb-4 flex items-end justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#00f9ff] shadow-[0_0_12px_#00f9ff]" />
-            <h1 className="font-display text-5xl tracking-[-1.5px] font-black neon-cyan">NEONXURGE</h1>
+    <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col items-center py-0 px-2 select-none">
+      {/* Big header only on small screens outside of gameplay (menu etc.) */}
+      {isSmallScreen && screen !== 'game' && (
+        <div className="w-full max-w-[1600px] mb-1 flex items-end justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="w-2.5 h-2.5 rounded-full bg-[#00f9ff] shadow-[0_0_12px_#00f9ff]" />
+              <h1 className="font-display text-5xl tracking-[-1.5px] font-black neon-cyan">NEONXURGE</h1>
+            </div>
+            <p className="text-[10px] tracking-[3px] text-[#6b7280] mt-0.5 ml-6">CYBERPUNK SURVIVOR</p>
           </div>
-          <p className="text-[10px] tracking-[3px] text-[#6b7280] mt-0.5 ml-6">CYBERPUNK SURVIVOR</p>
+
+          <div className="flex items-end gap-4">
+            <div className="text-right">
+              <div className="text-[10px] tracking-[2px] text-[#6b7280]">WASD / ARROWS TO MOVE</div>
+              <div className="text-[10px] tracking-[2px] text-[#6b7280]">PULSE FIRE ENABLED</div>
+            </div>
+
+            {/* Pause Button + Tab hint */}
+            <div className="flex flex-col items-end">
+              <div className="text-[9px] tracking-[1.5px] text-[#6b7280] text-right mb-0.5">
+                PRESS TAB TO PAUSE
+              </div>
+              <button
+                onClick={() => toggleSkillPanel()}
+                className="px-4 py-1 rounded border border-[#00f9ff]/60 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black text-xs tracking-[2.5px] transition-all"
+              >
+                PAUSE
+              </button>
+            </div>
+          </div>
         </div>
+      )}
 
-        <div className="flex items-end gap-4">
-          <div className="text-right">
-            <div className="text-[10px] tracking-[2px] text-[#6b7280]">WASD / ARROWS TO MOVE</div>
-            <div className="text-[10px] tracking-[2px] text-[#6b7280]">PULSE FIRE ENABLED</div>
+      {/* Minimal fixed top-right PAUSE + Tab hint during gameplay (both desktop and mobile) */}
+      {screen === 'game' && (
+        <div className="fixed top-3 right-4 z-50 flex flex-col items-end">
+          <div className="text-[9px] tracking-[1.5px] text-[#6b7280] text-right mb-1">
+            PRESS TAB TO PAUSE
           </div>
-
-          {/* Pause Button */}
           <button
             onClick={() => toggleSkillPanel()}
-            className="px-4 py-1 rounded border border-[#00f9ff]/60 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black text-xs tracking-[2.5px] transition-all"
+            className="px-3 py-0.5 text-xs rounded border border-[#00f9ff]/50 text-[#00f9ff] hover:bg-[#00f9ff] hover:text-black tracking-[2px] transition-all"
           >
             PAUSE
           </button>
         </div>
-      </div>
+      )}
 
-      {/* Game Container */}
-      <div className="relative">
-        {/* Top HUD Bar */}
-        <div className="flex items-center justify-between w-[816px] mb-2 px-1">
-          {/* Wallet status (blockchain) */}
-          {isConnected && (
-            <div className="text-[10px] font-mono px-2 py-1 rounded bg-black/60 border border-[#00f9ff]/30 text-[#00f9ff] self-start">
-              {shortAddress} <span className="text-[8px] text-[#6b7280]">SEPOLIA</span>
+      {/* Game Container — responsive for all laptops, always centered, fits vertically with no scroll */}
+      <div className="w-full flex-1 flex flex-col items-center justify-center min-h-0 px-2 py-1 overflow-hidden">
+        {/* Mobile: Light overlay HUD + centered box wrapper */}
+        <div className={`relative w-full max-w-[800px] flex-shrink-0 ${isSmallScreen ? '' : 'flex flex-col'}`}>
+          
+          {/* Top HUD - normal flow on desktop, light overlay on mobile */}
+          <div className={`z-40 ${isSmallScreen ? 'absolute top-1 left-1/2 -translate-x-1/2' : 'mb-1.5'}`}>
+            <div className={`hud-panel flex items-center justify-center ${isSmallScreen ? 'gap-4 px-4 py-0.5 text-xs' : 'gap-8 px-6 py-1.5 text-sm'} rounded mx-auto`}>
+              {/* Score */}
+              <div className="flex items-baseline gap-1.5">
+                <span className={`${isSmallScreen ? 'text-[7px]' : 'text-[10px]'} tracking-[1.5px] text-[#6b7280]`}>SCORE</span>
+                <span className={`font-display ${isSmallScreen ? 'text-base' : 'text-2xl'} font-semibold tabular-nums tracking-tighter text-[#00f9ff]`}>
+                  {hud.score.toString().padStart(5, '0')}
+                </span>
+              </div>
+
+              <div className={`${isSmallScreen ? 'h-2.5' : 'h-4'} w-px bg-white/15`} />
+
+              {/* Kills */}
+              <div className="flex items-baseline gap-1.5">
+                <span className={`${isSmallScreen ? 'text-[7px]' : 'text-[10px]'} tracking-[1.5px] text-[#6b7280]`}>KILLS</span>
+                <span className={`font-display ${isSmallScreen ? 'text-base' : 'text-2xl'} font-semibold tabular-nums tracking-tighter text-[#ff2a6d]`}>
+                  {hud.kills.toString().padStart(3, '0')}
+                </span>
+              </div>
+
+              <div className={`${isSmallScreen ? 'h-2.5' : 'h-4'} w-px bg-white/15`} />
+
+              {/* Time */}
+              <div className="flex items-baseline gap-1.5">
+                <span className={`${isSmallScreen ? 'text-[7px]' : 'text-[10px]'} tracking-[1.5px] text-[#6b7280]`}>TIME</span>
+                <span className={`font-display ${isSmallScreen ? 'text-base' : 'text-2xl'} font-bold tabular-nums tracking-[-1px] neon-purple`}>
+                  {stageTimeDisplay}
+                </span>
+              </div>
+
+              <div className={`${isSmallScreen ? 'h-2.5' : 'h-4'} w-px bg-white/15`} />
+
+              {/* Stage */}
+              <div className="flex items-baseline gap-1.5">
+                <span className={`${isSmallScreen ? 'text-[7px]' : 'text-[10px]'} tracking-[1.5px] text-[#6b7280]`}>STAGE</span>
+                <span className={`font-display ${isSmallScreen ? 'text-base' : 'text-2xl'} font-bold tabular-nums text-[#00f9ff]`}>
+                  {hud.currentStage || 1}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Boss Health Bar - light overlay on mobile */}
+          {currentBoss && (
+            <div className={`z-40 ${isSmallScreen ? 'absolute top-[38px] left-1/2 -translate-x-1/2 w-full max-w-[800px]' : 'mb-1.5'}`}>
+              <div className={`text-center text-[#ff2a6d] tracking-[2px] ${isSmallScreen ? 'text-[9px] mb-0.5' : 'text-xs mb-1'} font-bold`}>BOSS</div>
+              <div className={`${isSmallScreen ? 'h-2.5' : 'h-4'} bg-[#1a0a0f] border border-[#ff2a6d] rounded overflow-hidden`}>
+                <div 
+                  className="h-full bg-gradient-to-r from-[#ff2a6d] to-[#c026ff] transition-all duration-100"
+                  style={{ width: `${bossHealthPercent}%` }}
+                />
+              </div>
             </div>
           )}
-          {/* Score + Kills */}
-          <div className="hud-panel flex items-center gap-8 px-5 py-2 rounded">
-            <div>
-              <div className="text-[10px] tracking-[2px] text-[#6b7280]">SCORE</div>
-              <div className="font-display text-3xl font-semibold tabular-nums tracking-tighter text-[#00f9ff] hud-value">
-                {hud.score.toString().padStart(5, '0')}
-              </div>
-            </div>
-            <div className="h-7 w-px bg-white/10" />
-            <div>
-              <div className="text-[10px] tracking-[2px] text-[#6b7280]">KILLS</div>
-              <div className="font-display text-3xl font-semibold tabular-nums tracking-tighter text-[#ff2a6d] hud-value">
-                {hud.kills.toString().padStart(3, '0')}
-              </div>
-            </div>
-          </div>
 
-          {/* Timer + Stage */}
-          <div className="hud-panel px-5 py-2 rounded text-center min-w-[132px]">
-            <div className="text-[10px] tracking-[2px] text-[#6b7280]">STAGE TIME</div>
-            <div className="font-display text-4xl font-bold tabular-nums tracking-[-1px] neon-purple mt-[-2px]">
-              {stageTimeDisplay}
-            </div>
-            <div className="text-[10px] tracking-[2px] text-[#00f9ff] mt-0.5">
-              STAGE {String(hud.currentStage || 1).padStart(2, '0')} / 10
-            </div>
+          {/* THE BOX — responsive, centered, scales to fit any laptop height while keeping perfect 800x600 proportions. */}
+          <div 
+            className="relative game-frame scanlines flex-shrink-0"
+            style={{ 
+              width: '100%',
+              maxWidth: '800px',
+              maxHeight: 'calc(100vh - 118px)',
+              aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`
+            }}
+          >
+            <canvas
+              ref={canvasRef}
+              width={CANVAS_WIDTH}
+              height={CANVAS_HEIGHT}
+              className="absolute inset-0 w-full h-full rounded-[1px] bg-black touch-none select-none"
+              onTouchStart={handleTouchInput}
+              onTouchMove={handleTouchInput}
+              onTouchEnd={() => { touchTargetRef.current = null; }}
+            />
           </div>
         </div>
 
-        {/* Boss Health Bar */}
-        {currentBoss && (
-          <div className="w-[816px] mb-2">
-            <div className="text-center text-[#ff2a6d] text-xs tracking-[3px] mb-1 font-bold">BOSS</div>
-            <div className="h-4 bg-[#1a0a0f] border border-[#ff2a6d] rounded overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-[#ff2a6d] to-[#c026ff] transition-all duration-100"
-                style={{ width: `${bossHealthPercent}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Responsive Canvas Container - maintains 4:3 aspect ratio */}
-        <div 
-          className="relative w-full max-w-[800px] mx-auto game-frame scanlines"
-          style={{ aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}` }}
-        >
-          <canvas
-            ref={canvasRef}
-            width={CANVAS_WIDTH}
-            height={CANVAS_HEIGHT}
-            className="absolute inset-0 w-full h-full rounded-[1px] bg-black touch-none"
-            onTouchStart={handleTouchInput}
-            onTouchMove={handleTouchInput}
-            onTouchEnd={() => { touchTargetRef.current = null; }}
-          />
-        </div>
-
-        {/* Bottom XP Bar + Level */}
-        <div className="mt-3 w-[816px]">
-          <div className="flex items-center justify-between text-[10px] tracking-[2.5px] mb-1.5 px-1 text-[#9ca3af]">
-            <div>LEVEL <span className="font-display text-[#00f9ff] text-lg font-bold align-middle tabular-nums">{hud.level}</span></div>
-            <div>XP</div>
-          </div>
-
-          <div className="xp-bar-container h-[7px] rounded flex">
+        {/* Bottom XP Bar — compact (stays below the centered box) */}
+        <div className="w-full max-w-[800px] mt-1.5 flex-shrink-0">
+          <div className="xp-bar-container h-[3px] rounded flex">
             <div
               className="xp-bar-fill h-full rounded"
               style={{ width: `${xpProgress}%` }}
             />
           </div>
-        </div>
-
-        {/* Right side kills detail (floating) */}
-        <div className="absolute -right-[138px] top-[88px] hud-panel px-4 py-3 rounded text-center">
-          <div className="text-[10px] tracking-[2px] text-[#6b7280]">DRONES<br />ELIMINATED</div>
-          <div className="font-display text-5xl font-bold text-[#ff2a6d] tabular-nums tracking-[-2px] mt-1">{hud.kills}</div>
-          {hud.combo > 1 && (
-            <div className="text-[#00f9ff] text-xs tracking-[1px] mt-0.5 font-mono">x{hud.combo} COMBO</div>
-          )}
+          <div className="flex justify-between items-baseline mt-1 text-[#9ca3af]">
+            <div className="flex items-baseline gap-1">
+              <span className="text-[9px] tracking-[1.5px]">LEVEL</span>
+              <span className="font-display text-[#00f9ff] text-lg font-bold tabular-nums leading-none">
+                {hud.level}
+              </span>
+            </div>
+            <div className="text-[9px] tracking-[1.5px]">XP</div>
+          </div>
         </div>
       </div>
 
-      {/* Instructions footer */}
-      <div className="mt-5 text-center">
-        <div className="instructions">
-          MOVE WITH <span className="text-[#00f9ff]">WASD</span> OR <span className="text-[#00f9ff]">ARROW KEYS</span> • COLLECT <span className="text-[#00b4ff]">BLUE ORBS</span> FOR XP • SURVIVE AS LONG AS YOU CAN
+      {/* Instructions footer — hidden on mobile when touch controls are active */}
+      {!isSmallScreen && (
+        <div className="mt-2 text-center">
+          <div className="instructions">
+            MOVE WITH <span className="text-[#00f9ff]">WASD</span> OR <span className="text-[#00f9ff]">ARROW KEYS</span> • COLLECT <span className="text-[#00b4ff]">BLUE ORBS</span> FOR XP • SURVIVE AS LONG AS YOU CAN
+          </div>
         </div>
-        <div className="text-[10px] text-[#4b5563] mt-2 tracking-widest">ENEMIES GROW STRONGER OVER TIME — EVERY 30 SECONDS SPAWN RATE INCREASES</div>
-      </div>
+      )}
+
+      {/* ==================== MOBILE TOUCH CONTROLS ==================== */}
+      {isSmallScreen && screen === 'game' && (
+        <>
+          {/* Left Virtual Joystick - Movement */}
+          <div
+            id="virtual-joystick"
+            className="fixed bottom-2 left-2 z-[60] w-[110px] h-[110px] rounded-full bg-black/50 border border-[#00f9ff]/50 touch-none select-none active:bg-black/60"
+            onTouchStart={(e) => {
+              e.preventDefault();
+              handleJoystickStart(e.touches[0].clientX, e.touches[0].clientY);
+            }}
+            onTouchMove={(e) => {
+              e.preventDefault();
+              handleJoystickMove(e.touches[0].clientX, e.touches[0].clientY);
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              handleJoystickEnd();
+            }}
+            onTouchCancel={handleJoystickEnd}
+          >
+            {/* Joystick base ring */}
+            <div className="absolute inset-0 rounded-full border border-[#00f9ff]/25" />
+            
+            {/* Knob */}
+            <div 
+              id="joystick-knob"
+              className="absolute w-[40px] h-[40px] bg-[#00f9ff] rounded-full shadow-[0_0_12px_#00f9ff] border border-white/80 pointer-events-none"
+              style={{ 
+                left: '35px', 
+                top: '35px',
+                transition: 'none'
+              }}
+            />
+          </div>
+
+          {/* Right Fire Zone - Shooting */}
+          <div
+            className="fixed bottom-2 right-2 z-[60] w-[110px] h-[110px] rounded-full bg-[#ff2a6d]/20 border border-[#ff2a6d]/50 touch-none select-none flex items-center justify-center active:bg-[#ff2a6d]/30"
+            onTouchStart={(e) => {
+              e.preventDefault();
+              handleRightFireStart(e);
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              handleRightFireEnd();
+            }}
+            onTouchCancel={handleRightFireEnd}
+          >
+            <div className="text-[#ff2a6d] text-xs font-bold tracking-[3px] pointer-events-none select-none">
+              FIRE
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ========== LEVEL UP: ONLY ACTIVE + PASSIVE SKILLS ========== */}
       {hud.isLevelingUp && levelUpChoices.length > 0 && (
@@ -5347,6 +6380,11 @@ export default function NeonSurgeGame() {
                         if (fusionRecipe) {
                           st.skills.fusedActives[choice.active] = fusionRecipe.fusionName;
                           st.skills.fusions.push(fusionRecipe.fusionName);
+
+                          runFusionsRef.current += 1;
+                          if (runFusionsRef.current >= 5) {
+                            unlockAchievement('fusionExpert');
+                          }
 
                           // EPIC FUSION TRANSFORMATION
                           playSound('stageClear');
@@ -5578,7 +6616,7 @@ export default function NeonSurgeGame() {
                 : `STAGE ${String(hud.currentStage).padStart(2, '0')} / 10 COMPLETE`}
             </div>
 
-            {/* Rewards Section - Enhanced with NSH */}
+            {/* Rewards Section */}
             <div className="mb-8">
               <div className="text-sm tracking-[3px] text-[#6b7280] mb-3">REWARDS</div>
               <div className="space-y-2">
@@ -5586,12 +6624,12 @@ export default function NeonSurgeGame() {
                   +{stageClearRewards.xp} XP
                 </div>
                 <div className="text-3xl font-display text-[#ff2a6d] flex items-center justify-center gap-2 drop-shadow-[0_0_12px_rgba(255,42,109,0.5)]">
-                  <span>◆</span> +{stageClearRewards.shards} Neon Shards
+                  <span>◆</span> +{stageClearRewards.shards} Neon Shards (NS)
                 </div>
-                {/* NSH Reward Display */}
-                {pendingNshRewards > 0n && (
+                {/* $XURGE Reward Display (Utility / Play-to-Earn Token) */}
+                {pendingXurgeRewards > 0n && (
                   <div className="text-3xl font-display text-[#c026ff] flex items-center justify-center gap-2 drop-shadow-[0_0_12px_rgba(192,38,255,0.5)] animate-pulse">
-                    <span>✦</span> +{pendingNshRewards.toString()} NSH
+                    <span>✦</span> +{pendingXurgeRewards.toString()} $XURGE
                   </div>
                 )}
               </div>
@@ -5604,6 +6642,7 @@ export default function NeonSurgeGame() {
                   if (!st) return;
 
                   setShowStageClear(false);
+                  setPendingXurgeRewards(0n); // Clear pending $XURGE rewards after claiming
 
                   const nextStage = Math.min(10, st.currentStage + 1);
 
@@ -5636,6 +6675,7 @@ export default function NeonSurgeGame() {
                 <button
                   onClick={() => {
                     setShowStageClear(false);
+                    setPendingXurgeRewards(0n);
                     setShowNFT(true);
                   }}
                   className="mt-2 text-sm px-8 py-2 rounded-lg border border-[#ff2a6d] text-[#ff2a6d] hover:bg-[#ff2a6d] hover:text-black tracking-[3px] transition-all"
