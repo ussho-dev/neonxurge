@@ -17,8 +17,8 @@ export const config = createConfig({
 
 // Contract addresses - UPDATE THESE AFTER YOU DEPLOY ON SEPOLIA (via Remix or Hardhat)
 // See /contracts folder for the .sol source + Remix deploy instructions.
-export const LEADERBOARD_ADDRESS = '0xfcb5c08c35db113ab220b8507ee815f872dbafde'; // Deployed Leaderboard
-export const NFT_ADDRESS = '0x8160a9c85ab394ea22a67ee9bf7512beef99cf35'; // Deployed NeonXurge Survivor NFT
+export const LEADERBOARD_ADDRESS = '0xfcb5c08c35db113ab220b8507ee815f872dbafde'; // Deployed Leaderboard (unchanged)
+export const NFT_ADDRESS = '0x8160a9c85ab394ea22a67ee9bf7512beef99cf35'; // Deployed NeonXurge Survivor NFT (unchanged)
 
 // Set to true ONLY for fully local/demo testing with no real contracts
 export const IS_DEMO_MODE = false;
@@ -107,8 +107,15 @@ export const NFT_TIERS = {
 
 export type NFTTier = 0 | 1 | 2;
 
-// ==================== NEON SHARD (NSH) ERC-20 ====================
-export const NSH_ADDRESS = '0x79fd542116317111101630a8bcfab096ac219b7b' as const;
+// ==================== TOKEN SYSTEM (New Structure) ====================
+// NS     = Neon Shards          → Soft / In-game currency (local only, earned via play)
+// $NXG   = NeonXurge            → Governance + Staking token (future features: voting, staking rewards)
+// $XURGE = Xurge                → Play-to-Earn + Utility token (NFT minting, upgrades, events, real rewards)
+
+export const XURGE_ADDRESS = '0x79fd542116317111101630a8bcfab096ac219b7b' as const; // Current deployed utility token (previously labeled NSH)
+
+// Placeholder for future $NXG governance token (not yet deployed)
+export const NXG_ADDRESS = '' as const; // TODO: Deploy $NXG governance token and update here
 
 // Minimal ERC-20 ABI (sufficient for balance, transfer, and basic info)
 export const ERC20_ABI = [

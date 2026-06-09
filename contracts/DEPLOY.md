@@ -49,19 +49,15 @@ Enjoy the on-chain cyberpunk glory.
 
 ---
 
-## Deploying NeonShard (NSH) – ERC-20 Token
+## Token System (Updated Structure)
 
-**Neon Shard (NSH)** is the main in-game currency of NeonXurge.
+NeonXurge now uses a three-token economy:
 
-### Token Details
-- **Name**: Neon Shard
-- **Symbol**: NSH
-- **Decimals**: 18
-- **Total Supply**: 1,000,000,000 NSH (1 Billion) — all pre-minted to the deployer
-- **Features**:
-  - Owner-only `mint()` function (for future game rewards)
-  - Public `burn()` function (token sink)
-  - Owner `burnFrom()` for administrative control
+- **NS (Neon Shards)** — Soft / In-game currency (local only, earned via play, Daily Rewards, Achievements, Equipment upgrades)
+- **$XURGE (Xurge)** — Play-to-Earn + Utility token (NFT minting, Equipment upgrades, event rewards). The previously deployed "NeonShard" contract address is now treated as $XURGE.
+- **$NXG (NeonXurge)** — Governance + Staking token (planned for future voting, staking, and DAO features)
+
+The old NSH contract at `0x79fd5421...` is now designated as the **$XURGE** utility token.
 
 ### Quick Deploy via Remix (Recommended)
 
